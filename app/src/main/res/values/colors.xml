@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- camera-ui.html palette -->
+    <color name="ui_surface">#FF17181B</color>
+    <color name="ui_surface_high">#FF1C1C1E</color>
+    <color name="ui_surface_higher">#FF2A2A2D</color>
+    <color name="ui_text">#FFFFFFFF</color>
+    <color name="ui_text_dim">#B3FFFFFF</color>
+    <color name="ui_text_faint">#73FFFFFF</color>
+    <color name="ui_accent">#FFFFD54A</color>
+    <color name="ui_rec">#FFFF4A3D</color>
+    <color name="ui_glass">#8C1C1C1E</color>
+    <color name="ui_glass_strong">#D9141416</color>
+    <color name="ui_active">#2EFFFFFF</color>
+    <color name="ui_line">#33FFFFFF</color>
+    <color name="ui_grid">#59FFFFFF</color>
+    <color name="ui_scrim">#A6000000</color>
+    <color name="ui_ripple">#33FFFFFF</color>
+    <color name="ui_border">#80FFFFFF</color>
+</resources>

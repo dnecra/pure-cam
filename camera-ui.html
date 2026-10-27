@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Camera UI mockup</title>
+<style>
+:root{--page:#e4e6eb;--accent:#ffd54a;--rec:#ff4a3d;--dim:rgba(255,255,255,.7);--glass:rgba(28,28,30,.55);color-scheme:dark;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--page:#17181b}}
+:root[data-theme="dark"]{--page:#17181b}
+html,body{height:100%;margin:0}
+body{background:var(--page);display:flex;align-items:center;justify-content:center;font-family:"Google Sans","Segoe UI",Roboto,system-ui,sans-serif;color:#fff;user-select:none;-webkit-user-select:none;overflow:hidden}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.phone{position:relative;width:min(100vw,410px);height:min(100dvh,860px);background:#000;overflow:hidden;border-radius:34px;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+@media (max-width:430px){.phone{border-radius:0;height:100dvh}}
+.top{position:absolute;top:0;left:0;right:0;height:60px;display:flex;align-items:center;justify-content:space-around;padding:0 10px;z-index:5}
+.tb{display:flex;align-items:center;gap:5px;height:40px;padding:0 10px;border-radius:20px;font-size:12px;color:var(--dim)}
+.tb.on{color:var(--accent)}
+svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.stage{position:absolute;top:60px;bottom:196px;left:0;right:0;display:flex;align-items:center;justify-content:center}
+.vf{position:relative;width:100%;aspect-ratio:3/4;max-height:100%;overflow:hidden;border-radius:18px;touch-action:none;background:#111;transition:aspect-ratio .3s}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.grid{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .2s;background:
+linear-gradient(rgba(255,255,255,.35),rgba(255,255,255,.35)) 33.33% 0/1px 100% no-repeat,
+linear-gradient(rgba(255,255,255,.35),rgba(255,255,255,.35)) 66.66% 0/1px 100% no-repeat,
+linear-gradient(rgba(255,255,255,.35),rgba(255,255,255,.35)) 0 33.33%/100% 1px no-repeat,
+linear-gradient(rgba(255,255,255,.35),rgba(255,255,255,.35)) 0 66.66%/100% 1px no-repeat}
+.grid.on{opacity:1}
+.portrait{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .3s;backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);-webkit-mask-image:radial-gradient(ellipse 38% 34% at 50% 52%,transparent 60%,#000 100%);mask-image:radial-gradient(ellipse 38% 34% at 50% 52%,transparent 60%,#000 100%)}
+.portrait.on{opacity:1}
+.focus{position:absolute;width:76px;height:76px;margin:-38px 0 0 -38px;border:2px solid var(--accent);border-radius:50%;opacity:0;transform:scale(1.6);transition:transform .22s ease-out,opacity .3s;pointer-events:none}
+.focus.show{opacity:1;transform:scale(1)}
+.focus.dim{opacity:.45}
+.lock{position:absolute;transform:translateX(-50%);font-size:11px;background:var(--accent);color:#000;padding:3px 8px;border-radius:10px;opacity:0;pointer-events:none;white-space:nowrap;transition:opacity .2s}
+.lock.show{opacity:1}
+.ev{position:absolute;width:36px;height:150px;opacity:0;pointer-events:none;transition:opacity .25s;touch-action:none;cursor:ns-resize}
+.ev.show{opacity:1;pointer-events:auto}
+.ev .track{position:absolute;left:17px;top:14px;bottom:14px;width:2px;background:rgba(255,213,74,.75);border-radius:1px}
+.ev .sun{position:absolute;left:3px;width:30px;height:30px;margin-top:-15px;display:flex;align-items:center;justify-content:center;background:var(--glass);border-radius:50%;color:var(--accent)}
+.evv{position:absolute;font-size:11px;color:var(--accent);left:50%;transform:translateX(-50%);white-space:nowrap}
+.badge{position:absolute;top:14px;left:50%;transform:translateX(-50%);background:var(--glass);padding:5px 12px;border-radius:16px;font-size:15px;opacity:0;transition:opacity .25s;pointer-events:none}
+.badge.show{opacity:1}
+.chip{position:absolute;top:12px;left:50%;transform:translateX(-50%);background:var(--glass);padding:5px 12px;border-radius:14px;font-size:12px;white-space:nowrap;display:none;pointer-events:none}
+.chip.rec{display:block;background:rgba(0,0,0,.5)}
+.chip.rec::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--rec);margin-right:7px;animation:bl 1s infinite}
+@keyframes bl{50%{opacity:.2}}
+.count{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:110px;font-weight:300;pointer-events:none;text-shadow:0 2px 20px rgba(0,0,0,.4)}
+.pills{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:4px;background:var(--glass);padding:4px;border-radius:24px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.pill{min-width:34px;height:34px;border-radius:17px;font-size:12px;padding:0 8px;color:var(--dim)}
+.pill.act{background:rgba(255,255,255,.18);color:var(--accent);font-size:13px;min-width:46px}
+.flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
+.flash.go{animation:fl .35s ease-out}
+.flash.strong{animation:fl2 .6s ease-out}
+@keyframes fl{0%{opacity:.85}100%{opacity:0}}
+@keyframes fl2{0%{opacity:1}40%{opacity:1}100%{opacity:0}}
+.modes{position:absolute;left:0;right:0;bottom:118px;height:44px;overflow:hidden}
+.mtrack{position:absolute;left:0;top:0;display:flex;gap:6px;transition:transform .3s cubic-bezier(.3,.7,.3,1)}
+.mode{height:34px;margin-top:5px;padding:0 15px;border-radius:17px;font-size:14px;color:var(--dim);white-space:nowrap}
+.mode.act{background:rgba(255,255,255,.16);color:var(--accent)}
+.bar{position:absolute;left:0;right:0;bottom:16px;height:92px;display:flex;align-items:center;justify-content:space-between;padding:0 34px}
+.thumb{width:54px;height:54px;border-radius:14px;border:2px solid rgba(255,255,255,.5);background:#2a2a2d center/cover;overflow:hidden;position:relative}
+.thumb img{width:100%;height:100%;object-fit:cover;display:none}
+.play{position:absolute;right:3px;bottom:3px;width:16px;height:16px;border-radius:50%;background:rgba(0,0,0,.6);display:none}
+.shutter{width:78px;height:78px;border-radius:50%;border:4px solid #fff;display:flex;align-items:center;justify-content:center;transition:transform .12s}
+.shutter:active{transform:scale(.92)}
+.shutter i{width:62px;height:62px;border-radius:50%;background:#fff;transition:all .2s}
+.shutter.video i{background:var(--rec)}
+.shutter.recording i{width:30px;height:30px;border-radius:8px}
+.flip{width:54px;height:54px;border-radius:50%;background:rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center}
+.flip svg{width:26px;height:26px}
+.toast{position:absolute;left:50%;bottom:210px;transform:translate(-50%,8px);background:rgba(20,20,22,.85);padding:8px 14px;border-radius:16px;font-size:13px;opacity:0;transition:all .25s;pointer-events:none;z-index:9;max-width:88%;text-align:center}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.viewer{position:absolute;inset:0;background:#000;z-index:20;display:none;flex-direction:column}
+.viewer.show{display:flex}
+.viewer .vtop{height:60px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;font-size:14px}
+.viewer .img{flex:1;background:center/contain no-repeat;margin:0 0 70px}
+.viewer .nav{position:absolute;bottom:20px;left:0;right:0;display:flex;justify-content:center;gap:30px}
+.viewer .nav button{height:40px;padding:0 20px;border-radius:20px;background:rgba(255,255,255,.14)}
+</style>
+</head>
+<body>
+<div class="phone" id="phone">
+  <div class="top">
+    <button class="tb" id="bFlash" aria-label="Flash"><svg viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg><span>Off</span></button>
+    <button class="tb" id="bTimer" aria-label="Timer"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/></svg><span>Off</span></button>
+    <button class="tb" id="bHdr" aria-label="HDR+"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="3"/><path d="M8 10v4M8 12h3M11 10v4M14 14v-4h1.5a1.5 1.5 0 010 3H14"/></svg><span>On</span></button>
+    <button class="tb" id="bGrid" aria-label="Grid"><svg viewBox="0 0 24 24"><path d="M3 3h18v18H3zM9 3v18M15 3v18M3 9h18M3 15h18"/></svg><span>Off</span></button>
+    <button class="tb" id="bAr" aria-label="Aspect ratio"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/></svg><span>3:4</span></button>
+  </div>
+
+  <div class="stage">
+    <div class="vf" id="vf">
+      <canvas id="cv"></canvas>
+      <div class="portrait" id="portrait"></div>
+      <div class="grid" id="grid"></div>
+      <div class="focus" id="focus"></div>
+      <div class="lock" id="lock">AE/AF lock</div>
+      <div class="ev" id="ev"><div class="track" id="track"></div><div class="sun" id="sun"><svg viewBox="0 0 24 24" style="width:18px;height:18px"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg></div><div class="evv" id="evv"></div></div>
+      <div class="badge" id="badge">1.0×</div>
+      <div class="chip" id="chip"></div>
+      <div class="count" id="count"></div>
+      <div class="pills" id="pills"></div>
+      <div class="flash" id="flash"></div>
+    </div>
+  </div>
+
+  <div class="modes" id="modes"><div class="mtrack" id="mtrack"></div></div>
+  <div class="bar">
+    <button class="thumb" id="thumb" aria-label="Last photo"><img id="timg" alt=""><span class="play" id="play"></span></button>
+    <button class="shutter" id="shutter" aria-label="Shutter"><i></i></button>
+    <button class="flip" id="flip" aria-label="Switch camera"><svg viewBox="0 0 24 24"><path d="M4 8V5h3M20 16v3h-3M5 8a8 8 0 0114-1M19 16a8 8 0 01-14 1"/></svg></button>
+  </div>
+  <div class="toast" id="toast"></div>
+  <div class="viewer" id="viewer">
+    <div class="vtop"><span id="vcount"></span><button id="vclose" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M5 5l14 14M19 5L5 19"/></svg></button></div>
+    <div class="img" id="vimg"></div>
+    <div class="nav"><button id="vprev">Previous</button><button id="vnext">Next</button></div>
+  </div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s), clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+const vf=$('#vf'),cv=$('#cv'),ctx=cv.getContext('2d',{willReadFrequently:true});
+let W=0,H=0,dpr=1;
+function size(){const r=vf.getBoundingClientRect();W=r.width;H=r.height;dpr=Math.min(devicePixelRatio||1,2);cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr)}
+new ResizeObserver(size).observe(vf);
+
+/* state */
+let zoom=1,ev=0,autoEv=0,autoTarget=0,blur=0,mode='Photo',locked=false,hdr=true;
+let flashM=0,timerM=0,gridOn=false,arI=0,counting=false,rec=false,recT=0,recI=null;
+const flashN=['Off','Auto','On'],timerN=['Off','3s','10s'],ars=[['3:4',3/4],['9:16',9/16],['1:1',1]];
+const modes=['Night','Portrait','Photo','Video'], shots=[];
+let facing='environment',stream=null;const video=document.createElement('video');video.playsInline=true;video.muted=true;
+
+/* demo scene */
+function ridge(t,x,seed,amp){return Math.sin(x*3+seed)*amp+Math.sin(x*7.3+seed*2)*amp*.45+Math.sin(x*13+seed*3)*amp*.15}
+function scene(t,w,h){
+  const hz=h*.55;
+  let g=ctx.createLinearGradient(0,0,0,hz);g.addColorStop(0,'#26356b');g.addColorStop(.55,'#d9708a');g.addColorStop(1,'#ffc98a');
+  ctx.fillStyle=g;ctx.fillRect(0,0,w,hz+2);
+  const sx=w*.66,sy=hz-h*.07;
+  g=ctx.createRadialGradient(sx,sy,0,sx,sy,w*.5);g.addColorStop(0,'rgba(255,246,210,1)');g.addColorStop(.08,'rgba(255,230,160,.95)');g.addColorStop(.2,'rgba(255,190,120,.35)');g.addColorStop(1,'rgba(255,160,100,0)');
+  ctx.fillStyle=g;ctx.fillRect(0,0,w,hz);
+  ctx.fillStyle='rgba(255,236,210,.55)';
+  for(let i=0;i<4;i++){const cx=((t*8+i*w*.35)%(w*1.4))-w*.2,cy=h*(.12+i*.07);ctx.beginPath();ctx.ellipse(cx,cy,w*.16,h*.016,0,0,7);ctx.ellipse(cx+w*.07,cy-h*.01,w*.1,h*.014,0,0,7);ctx.fill()}
+  [['#7a5a8a',.08,.2,1],['#5a4577',.12,.14,2],['#352e55',.16,.1,3]].forEach(([c,a,off,s])=>{
+    ctx.fillStyle=c;ctx.beginPath();ctx.moveTo(0,hz);
+    for(let x=0;x<=w;x+=6)ctx.lineTo(x,hz-h*(a+off*.4)-ridge(t,x/w,s,h*a*.5));
+    ctx.lineTo(w,hz);ctx.fill()});
+  g=ctx.createLinearGradient(0,hz,0,h);g.addColorStop(0,'#f0a475');g.addColorStop(.35,'#6b4c7a');g.addColorStop(1,'#1d1a33');
+  ctx.fillStyle=g;ctx.fillRect(0,hz,w,h-hz);
+  for(let i=0;i<46;i++){const y=hz+8+i*i*.12*(h/800)+2,wd=(w*.18)*(1-i/60)+Math.sin(t*2+i)*8;if(y>h*.86)break;
+    ctx.fillStyle='rgba(255,226,170,'+(.5-i*.009)+')';ctx.fillRect(sx-wd/2+Math.sin(t*1.5+i*.7)*6,y,wd,2)}
+  const bx=w*.3,by=hz+h*.075+Math.sin(t*1.2)*2;
+  ctx.fillStyle='#2a1f3a';ctx.beginPath();ctx.moveTo(bx-26,by);ctx.lineTo(bx+26,by);ctx.lineTo(bx+16,by+9);ctx.lineTo(bx-18,by+9);ctx.fill();
+  ctx.fillStyle='#f6e6d0';ctx.beginPath();ctx.moveTo(bx,by-4);ctx.lineTo(bx,by-44);ctx.lineTo(bx+22,by-4);ctx.fill();
+  ctx.fillStyle='#e9b49a';ctx.beginPath();ctx.moveTo(bx-3,by-4);ctx.lineTo(bx-3,by-34);ctx.lineTo(bx-18,by-4);ctx.fill();
+  ctx.fillStyle='#120f20';ctx.beginPath();ctx.moveTo(0,h);ctx.lineTo(0,h*.88);
+  for(let x=0;x<=w;x+=10)ctx.lineTo(x,h*.9-Math.abs(Math.sin(x*.07+1))*h*.025);
+  ctx.lineTo(w,h);ctx.fill();
+  ctx.strokeStyle='#0b0916';ctx.lineWidth=2;
+  for(let i=0;i<30;i++){const x=i*w/28+6,l=h*(.05+((i*37)%11)/200);ctx.beginPath();ctx.moveTo(x,h*.93);ctx.quadraticCurveTo(x+Math.sin(t*1.6+i)*6,h*.93-l*.6,x+Math.sin(t*1.6+i)*12+8,h*.93-l);ctx.stroke()}
+}
+function frame(t){
+  t/=1000;
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);
+  const s=zoom/.6;
+  ctx.save();ctx.translate(W/2,H/2);ctx.scale(s,s);ctx.translate(-W/2,-H/2);
+  if(stream&&video.videoWidth){const k=Math.max(W/video.videoWidth,H/video.videoHeight),vw=video.videoWidth*k,vh=video.videoHeight*k;
+    if(facing==='user'){ctx.translate(W,0);ctx.scale(-1,1)}ctx.drawImage(video,(W-vw)/2,(H-vh)/2,vw,vh)}
+  else scene(t,W,H);
+  ctx.restore();
+  autoEv+=(autoTarget-autoEv)*.08;blur*=.9;if(blur<.05)blur=0;
+  let b=1+(ev+autoEv)*.28;if(mode==='Night')b*=1.22;
+  cv.style.filter='brightness('+clamp(b,.35,2.2).toFixed(3)+') blur('+blur.toFixed(2)+'px)'+(hdr?' saturate(1.12) contrast(.97)':'');
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* helpers */
+let toastT;function toast(m){const e=$('#toast');e.textContent=m;e.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>e.classList.remove('show'),1800)}
+let badgeT;function showBadge(){const b=$('#badge');b.textContent=zoom.toFixed(1)+'×';b.classList.add('show');clearTimeout(badgeT);badgeT=setTimeout(()=>b.classList.remove('show'),900)}
+
+/* zoom */
+const stops=[.6,1,2,5];
+function drawPills(){$('#pills').innerHTML=stops.map((z,i)=>{const n=stops[i+1]||99,act=zoom>=z-.001&&zoom<n-.001;
+  return '<button class="pill'+(act?' act':'')+'" data-z="'+z+'">'+(act?(Math.abs(zoom-z)<.05?z:zoom.toFixed(1)):z)+(act?'×':'')+'</button>'}).join('')}
+$('#pills').addEventListener('click',e=>{const b=e.target.closest('.pill');if(b)zoomTo(+b.dataset.z)});
+function setZoom(z){zoom=clamp(z,.6,8);drawPills();showBadge()}
+let zRaf;function zoomTo(z){cancelAnimationFrame(zRaf);const a=zoom,t0=performance.now();
+  (function st(n){const p=clamp((n-t0)/320,0,1);setZoom(a+(z-a)*(1-Math.pow(1-p,3)));if(p<1)zRaf=requestAnimationFrame(st)})(t0)}
+drawPills();
+vf.addEventListener('wheel',e=>{e.preventDefault();setZoom(zoom*Math.exp(-e.deltaY*.0025))},{passive:false});
+
+/* focus + exposure */
+const fEl=$('#focus'),evEl=$('#ev'),lockEl=$('#lock');let hideT;
+function evRender(){const p=1-(ev+2)/4;$('#sun').style.top=(14+p*122)+'px';const v=$('#evv');v.textContent=(ev>0?'+':'')+ev.toFixed(1);v.style.top=(p>.5?'-6px':'148px')}
+function focusAt(cx,cy,lock){
+  const r=vf.getBoundingClientRect(),x=clamp(cx-r.left,44,r.width-44),y=clamp(cy-r.top,44,r.height-44);
+  locked=!!lock;ev=0;evRender();
+  fEl.style.left=x+'px';fEl.style.top=y+'px';fEl.classList.remove('show','dim');void fEl.offsetWidth;fEl.classList.add('show');
+  evEl.style.left=(x>r.width-110?x-84:x+46)+'px';evEl.style.top=clamp(y-75,6,r.height-156)+'px';evEl.classList.add('show');
+  lockEl.style.left=x+'px';lockEl.style.top=(y+46)+'px';lockEl.classList.toggle('show',locked);
+  blur=4.5;
+  try{const d=ctx.getImageData(clamp(Math.round(x*dpr),0,cv.width-1),clamp(Math.round(y*dpr),0,cv.height-1),1,1).data;
+    const lum=(.2126*d[0]+.7152*d[1]+.0722*d[2])/255;autoTarget=clamp((.42-lum)*1.8,-.9,1.1)}catch(e){}
+  if(!stream)vibe();schedHide();
+}
+function vibe(){try{navigator.vibrate&&navigator.vibrate(8)}catch(e){}}
+function schedHide(){clearTimeout(hideT);if(locked)return;hideT=setTimeout(()=>{evEl.classList.remove('show');fEl.classList.add('dim');setTimeout(()=>{if(!locked)fEl.classList.remove('show','dim')},1200)},3500)}
+let drag=false;const trk=$('#track');
+function evUpd(e){const r=trk.getBoundingClientRect();ev=(1-clamp((e.clientY-r.top)/r.height,0,1))*4-2;evRender();clearTimeout(hideT)}
+evEl.addEventListener('pointerdown',e=>{e.stopPropagation();evEl.setPointerCapture(e.pointerId);drag=true;evUpd(e)});
+evEl.addEventListener('pointermove',e=>{if(drag)evUpd(e)});
+evEl.addEventListener('pointerup',()=>{drag=false;schedHide()});
+evRender();
+
+/* gestures */
+const ptrs=new Map();let tap=null,lastD=0,lpT;
+const dist=()=>{const [a,b]=[...ptrs.values()];return Math.hypot(a.x-b.x,a.y-b.y)};
+vf.addEventListener('pointerdown',e=>{
+  if(e.target.closest('.ev,.pills'))return;
+  vf.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(ptrs.size===1){tap={x:e.clientX,y:e.clientY,t:performance.now(),moved:false,long:false};
+    lpT=setTimeout(()=>{if(tap&&!tap.moved){tap.long=true;focusAt(tap.x,tap.y,true);toast('Exposure and focus locked')}},550)}
+  else{tap=null;clearTimeout(lpT);lastD=dist()}
+});
+vf.addEventListener('pointermove',e=>{
+  if(!ptrs.has(e.pointerId))return;ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(ptrs.size===2){const d=dist();if(lastD)setZoom(zoom*d/lastD);lastD=d}
+  else if(tap&&Math.hypot(e.clientX-tap.x,e.clientY-tap.y)>10){tap.moved=true;clearTimeout(lpT)}
+});
+function endP(e){
+  if(!ptrs.has(e.pointerId))return;ptrs.delete(e.pointerId);clearTimeout(lpT);if(ptrs.size<2)lastD=0;
+  if(tap&&!tap.long){const dx=e.clientX-tap.x,dy=e.clientY-tap.y;
+    if(!tap.moved&&performance.now()-tap.t<450)focusAt(tap.x,tap.y,false);
+    else if(Math.abs(dx)>60&&Math.abs(dy)<50)setMode(clamp(modes.indexOf(mode)+(dx<0?1:-1),0,modes.length-1))}
+  if(ptrs.size===0)tap=null;
+}
+vf.addEventListener('pointerup',endP);vf.addEventListener('pointercancel',endP);
+
+/* modes */
+function drawModes(){$('#mtrack').innerHTML=modes.map(m=>'<button class="mode'+(m===mode?' act':'')+'">'+m+'</button>').join('');
+  const els=[...document.querySelectorAll('.mode')];els.forEach((b,i)=>b.onclick=()=>setMode(i));placeModes()}
+function placeModes(){const a=document.querySelector('.mode.act');if(!a)return;const c=$('#modes').clientWidth/2;$('#mtrack').style.transform='translateX('+(c-(a.offsetLeft+a.offsetWidth/2))+'px)'}
+function setMode(i){if(rec)return;mode=modes[i];drawModes();
+  $('#portrait').classList.toggle('on',mode==='Portrait');
+  $('#shutter').classList.toggle('video',mode==='Video');
+  const c=$('#chip');c.className='chip';
+  if(mode==='Night'){c.style.display='block';c.textContent='Night Sight · hold still'}
+  else if(mode==='Portrait'){c.style.display='block';c.textContent='Portrait · tap to refocus'}
+  else c.style.display='none';
+  clearTimeout(window._ct);if(c.style.display==='block')window._ct=setTimeout(()=>{if(!rec)c.style.display='none'},2400)}
+drawModes();window.addEventListener('resize',placeModes);
+
+/* top buttons */
+function cyc(id,txt,on){const b=$(id);b.querySelector('span').textContent=txt;b.classList.toggle('on',on)}
+$('#bFlash').onclick=()=>{flashM=(flashM+1)%3;cyc('#bFlash',flashN[flashM],flashM>0);toast('Flash '+flashN[flashM].toLowerCase())};
+$('#bTimer').onclick=()=>{timerM=(timerM+1)%3;cyc('#bTimer',timerN[timerM],timerM>0);toast('Timer '+timerN[timerM].toLowerCase())};
+$('#bHdr').onclick=()=>{hdr=!hdr;cyc('#bHdr',hdr?'On':'Off',hdr);toast('HDR+ '+(hdr?'on':'off'))};
+$('#bGrid').onclick=()=>{gridOn=!gridOn;$('#grid').classList.toggle('on',gridOn);cyc('#bGrid',gridOn?'3×3':'Off',gridOn)};
+$('#bAr').onclick=()=>{arI=(arI+1)%3;vf.style.aspectRatio=ars[arI][1];cyc('#bAr',ars[arI][0],false)};
+cyc('#bHdr','On',true);
+
+/* capture */
+function snap(video){const o={url:cv.toDataURL('image/jpeg',.8),filter:cv.style.filter,video:!!video};shots.push(o);
+  const i=$('#timg');i.src=o.url;i.style.filter=o.filter;i.style.display='block';$('#play').style.display=video?'block':'none'}
+function doShot(){
+  const f=$('#flash');f.className='flash';void f.offsetWidth;f.classList.add(flashM===2?'strong':'go');
+  snap(false);toast(mode==='Night'?'Night Sight photo saved':'Photo saved');vibe()}
+function countdown(n){counting=true;const c=$('#count');c.style.display='flex';
+  (function tick(){if(n<=0){c.style.display='none';counting=false;doShot();return}c.textContent=n;n--;setTimeout(tick,1000)})()}
+function fmt(s){return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')}
+function toggleRec(){const sh=$('#shutter'),c=$('#chip');
+  if(!rec){rec=true;recT=0;sh.classList.add('recording');c.className='chip rec';c.style.display='block';c.textContent='00:00';
+    recI=setInterval(()=>{recT++;c.textContent=fmt(recT)},1000)}
+  else{rec=false;clearInterval(recI);sh.classList.remove('recording');c.style.display='none';c.className='chip';snap(true);toast('Video saved · '+fmt(recT))}}
+$('#shutter').onclick=()=>{if(counting)return;if(mode==='Video')return toggleRec();if(timerM)return countdown(timerM===1?3:10);doShot()};
+
+/* flip / real camera */
+$('#flip').onclick=async()=>{
+  try{const next=stream?(facing==='user'?'environment':'user'):facing;
+    if(stream)stream.getTracks().forEach(t=>t.stop());
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:next}});facing=next;
+    video.srcObject=stream;await video.play();toast(facing==='user'?'Front camera':'Rear camera')}
+  catch(e){stream=null;toast('Camera access isn’t available here. Showing the demo scene.')}};
+
+/* gallery viewer */
+let vi=0;function showV(){const s=shots[vi];$('#vimg').style.backgroundImage='url('+s.url+')';$('#vimg').style.filter=s.filter;$('#vcount').textContent=(vi+1)+' of '+shots.length+(s.video?' · Video':'')}
+$('#thumb').onclick=()=>{if(!shots.length)return toast('No photos yet. Take one first.');vi=shots.length-1;showV();$('#viewer').classList.add('show')};
+$('#vclose').onclick=()=>$('#viewer').classList.remove('show');
+$('#vprev').onclick=()=>{vi=(vi-1+shots.length)%shots.length;showV()};
+$('#vnext').onclick=()=>{vi=(vi+1)%shots.length;showV()};
+setTimeout(()=>toast('Tap to focus · pinch to zoom · drag the sun for exposure'),600);
+</script>
+</body>
+</html>
