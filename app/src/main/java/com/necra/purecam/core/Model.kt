@@ -110,20 +110,17 @@ data class CameraState(
     val zoom: Float,
     val exposure: ExposureMode,
     val focus: FocusMode,
-    val wb: WhiteBalanceMode,
-    /** Selected JPEG buffer size; null means the lens's largest still size. */
-    val photoResolution: SizeI? = null
+    val wb: WhiteBalanceMode
 ) {
     companion object {
-        fun defaults(profile: LensProfile, photoResolution: SizeI? = null): CameraState = CameraState(
+        fun defaults(profile: LensProfile): CameraState = CameraState(
             lens = profile,
             aspect = Aspect.R4_3,
             flash = false,
             zoom = 1f,
             exposure = ExposureMode.Auto,
             focus = FocusMode.Auto,
-            wb = WhiteBalanceMode.Auto,
-            photoResolution = photoResolution?.takeIf { it in profile.jpegSizes }
+            wb = WhiteBalanceMode.Auto
         )
     }
 
@@ -174,7 +171,6 @@ data class CameraState(
         lens = newLens,
         zoom = 1f,
         focus = FocusMode.Auto,
-        photoResolution = photoResolution?.takeIf { it in newLens.jpegSizes },
         exposure = when (exposure) {
             is ExposureMode.Manual -> ExposureMode.Manual(
                 newLens.isoRange?.clamp(exposure.iso) ?: exposure.iso,

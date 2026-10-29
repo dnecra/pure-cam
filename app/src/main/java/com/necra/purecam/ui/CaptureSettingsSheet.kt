@@ -22,10 +22,13 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.necra.purecam.HeicEncoder
 import com.necra.purecam.R
+import com.necra.purecam.core.ExportFormat
 import com.necra.purecam.core.SizeI
 import com.necra.purecam.presentation.CameraUiState
 import com.necra.purecam.presentation.CameraViewModel
@@ -33,9 +36,9 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
- * Capture settings: the still buffer size plus the video resolution and frame rate.
- * Replaces the old manual exposure/focus/WB sheet; white balance is cycled from the
- * main screen's WB button instead.
+ * Capture settings: the still export format plus the video resolution and frame rate.
+ * Stills always use the lens's largest buffer, so there is no resolution picker to get in
+ * the way; the sheet only chooses the container they are written in.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -79,43 +82,45 @@ fun CaptureSettingsSheet(
 
 @Composable
 private fun PhotoSection(state: CameraUiState, viewModel: CameraViewModel) {
-    Text(
-        text = stringResource(R.string.photo_resolution),
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
+    val heicSupported = remember { HeicEncoder.isSupported() }
+    SectionTitle(stringResource(R.string.export_format))
     Spacer(Modifier.height(8.dp))
-    val sizes = state.availablePhotoSizes
-    if (sizes.isEmpty()) {
-        Hint(stringResource(R.string.photo_resolution_unavailable))
-        return
-    }
-    val selected = state.photoResolution
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        sizes.forEach { size ->
+        ExportFormat.entries.forEach { format ->
             FilterChip(
-                selected = size == selected,
-                onClick = hapticAction { viewModel.setPhotoResolution(size) },
-                label = { Text(sizeLabel(size)) }
+                selected = state.exportFormat == format,
+                enabled = format != ExportFormat.HEIC || heicSupported,
+                onClick = hapticAction { viewModel.setExportFormat(format) },
+                label = { Text(format.label) }
             )
         }
     }
-    Spacer(Modifier.height(6.dp))
-    Hint(stringResource(R.string.photo_resolution_hint))
+    state.photoSize?.let { size ->
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = stringResource(R.string.photo_full_resolution, sizeLabel(size)),
+            style = MaterialTheme.typography.bodyMedium
+        )
+    }
+    Spacer(Modifier.height(4.dp))
+    Hint(stringResource(R.string.export_format_hint))
+    if (!heicSupported) {
+        Spacer(Modifier.height(2.dp))
+        Hint(stringResource(R.string.heic_unavailable))
+    } else if (state.exportFormat == ExportFormat.HEIC) {
+        Spacer(Modifier.height(2.dp))
+        Hint(stringResource(R.string.heic_fallback_hint))
+    }
 }
 
 @Composable
 private fun VideoSection(state: CameraUiState, viewModel: CameraViewModel) {
     val config = state.videoConfig
 
-    Text(
-        text = stringResource(R.string.resolution),
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
+    SectionTitle(stringResource(R.string.resolution))
     Spacer(Modifier.height(8.dp))
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -131,11 +136,7 @@ private fun VideoSection(state: CameraUiState, viewModel: CameraViewModel) {
     }
 
     Spacer(Modifier.height(20.dp))
-    Text(
-        text = stringResource(R.string.frame_rate),
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
+    SectionTitle(stringResource(R.string.frame_rate))
     Spacer(Modifier.height(8.dp))
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -168,6 +169,15 @@ private fun VideoSection(state: CameraUiState, viewModel: CameraViewModel) {
 }
 
 @Composable
+private fun SectionTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
+
+@Composable
 private fun Hint(text: String) {
     Text(
         text = text,
@@ -183,5 +193,5 @@ private fun sizeLabel(size: SizeI): String {
     } else {
         String.format(Locale.US, "%.1f MP", megapixels)
     }
-    return "$mp  ·  ${size.width}×${size.height}"
+    return "$mp · ${size.width}×${size.height}"
 }

@@ -45,8 +45,7 @@ object AspectMath {
         aspect: Aspect,
         screenAspect: Float,
         maxPreviewWidth: Int = 1920,
-        fullscreenAspect: Float? = null,
-        jpegSize: SizeI? = null
+        fullscreenAspect: Float? = null
     ): AspectPlan {
         val target = if (aspect == Aspect.R2_1 && fullscreenAspect != null &&
             fullscreenAspect.isFinite() && fullscreenAspect > 0.1f
@@ -57,8 +56,8 @@ object AspectMath {
         } else {
             sensorTargetAspect(aspect, screenAspect, profile.sensorOrientation)
         }
-        val jpeg = jpegSize?.takeIf { it in profile.jpegSizes }
-            ?: largestSize(profile.jpegSizes)
+        // Stills always use the largest buffer the lens offers; the ratio is a centre crop.
+        val jpeg = largestSize(profile.jpegSizes)
             ?: SizeI(profile.activeArray.width, profile.activeArray.height)
         val outputAspect = jpeg.aspect
         val preview = previewSize(profile.previewSizes, outputAspect, maxPreviewWidth) ?: jpeg

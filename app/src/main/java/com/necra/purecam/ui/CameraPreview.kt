@@ -3,7 +3,6 @@ package com.necra.purecam.ui
 import android.content.Context
 import android.graphics.Matrix
 import android.graphics.SurfaceTexture
-import android.net.Uri
 import android.view.TextureView
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
@@ -19,24 +18,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
-
-import androidx.compose.material3.MaterialTheme
-
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -44,13 +29,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -63,121 +45,11 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import com.necra.purecam.LiveReadout
-import com.necra.purecam.core.ExposureMath
 import com.necra.purecam.core.Facing
 import com.necra.purecam.presentation.CameraSignal
 import com.necra.purecam.presentation.CameraUiState
 import com.necra.purecam.presentation.CameraViewModel
 import kotlin.math.roundToInt
-
-/**
- * The lean camera screen: a full-bleed viewfinder with a small floating control layer.
- * Tap focuses and pinch zooms.
- */
-@Composable
-fun CameraScreen(
-    state: CameraUiState,
-    viewModel: CameraViewModel,
-    snackbarHostState: SnackbarHostState,
-    onOpenPhoto: (Uri) -> Unit
-) {
-    var settingsOpen by rememberSaveable { mutableStateOf(false) }
-
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        CameraPreview(state = state, viewModel = viewModel)
-        GridOverlay(visible = state.grid)
-        CountdownOverlay(countdown = state.countdown)
-
-        // Soft scrims keep the floating controls legible on bright scenes, the way native
-        // camera apps do it.
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .height(150.dp)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.Black.copy(alpha = 0.5f), Color.Transparent)
-                    )
-                )
-        )
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(230.dp)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.62f))
-                    )
-                )
-        )
-
-        ReadoutPill(
-            readout = state.readout,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
-                .padding(top = 72.dp)
-        )
-
-        if (state.recording) {
-            RecordingPill(
-                elapsedMs = state.recordingElapsedMs,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
-                    .padding(top = 108.dp)
-            )
-        }
-
-        TopControls(
-            state = state,
-            onFlash = viewModel::toggleFlash,
-            onTimer = viewModel::cycleTimer,
-            onGrid = viewModel::toggleGrid,
-            onManual = { settingsOpen = true },
-            modifier = Modifier.align(Alignment.TopCenter)
-        )
-
-        BottomControls(
-            state = state,
-            onShutter = viewModel::onShutter,
-            onFlip = viewModel::flipCamera,
-            onSelectLens = viewModel::selectLens,
-            onOpenPhoto = onOpenPhoto,
-            onSelectMode = viewModel::setCaptureMode,
-            onVideoSettings = { settingsOpen = true },
-            modifier = Modifier.align(Alignment.BottomCenter)
-        )
-
-        // The stock snackbar uses the light inverseSurface, which is jarring over a camera
-        // preview; scope a dark tonal palette to the host instead of re-implementing it.
-        MaterialTheme(
-            colorScheme = MaterialTheme.colorScheme.copy(
-                inverseSurface = MaterialTheme.colorScheme.surfaceContainerHigh,
-                inverseOnSurface = MaterialTheme.colorScheme.onSurface,
-                inversePrimary = MaterialTheme.colorScheme.primary
-            )
-        ) {
-            SnackbarHost(
-                hostState = snackbarHostState,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 200.dp, start = 24.dp, end = 24.dp)
-            )
-        }
-    }
-
-    if (settingsOpen) {
-        CaptureSettingsSheet(
-            state = state,
-            viewModel = viewModel,
-            onDismiss = { settingsOpen = false }
-        )
-    }
-}
 
 /**
  * TextureView hosted in Compose. The preview fills the whole window; a centre-crop matrix keeps
@@ -394,26 +266,5 @@ internal fun CountdownOverlay(countdown: Int?) {
                 color = Color.White
             )
         }
-    }
-}
-
-@Composable
-internal fun ReadoutPill(readout: LiveReadout?, modifier: Modifier = Modifier) {
-    val parts = buildList {
-        readout?.iso?.let { add("ISO $it") }
-        readout?.shutterNs?.let { add(ExposureMath.formatShutter(it)) }
-    }
-    if (parts.isEmpty()) return
-    Surface(
-        modifier = modifier,
-        shape = CircleShape,
-        color = Color.Black.copy(alpha = 0.34f)
-    ) {
-        Text(
-            text = parts.joinToString("   ·   "),
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-            style = MaterialTheme.typography.labelMedium,
-            color = Color.White.copy(alpha = 0.92f)
-        )
     }
 }

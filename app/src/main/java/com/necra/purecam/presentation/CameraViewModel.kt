@@ -4,24 +4,22 @@ import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.SystemClock
 import android.view.TextureView
 import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.necra.purecam.CameraController
 import com.necra.purecam.LensCatalog
-import com.necra.purecam.LiveReadout
 import com.necra.purecam.R
 import com.necra.purecam.core.Aspect
 import com.necra.purecam.core.AspectPlan
 import com.necra.purecam.core.CameraState
+import com.necra.purecam.core.ExportFormat
 import com.necra.purecam.core.ExposureMode
 import com.necra.purecam.core.Facing
 import com.necra.purecam.core.FocusMode
 import com.necra.purecam.core.LensMode
 import com.necra.purecam.core.LensProfile
-import com.necra.purecam.core.SizeI
 import com.necra.purecam.core.VideoConfig
 import com.necra.purecam.core.VideoMath
 import com.necra.purecam.core.VideoQuality
@@ -84,7 +82,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     private var preview: TextureView? = null
     private var resumed = false
     private var countdownJob: Job? = null
-    private var recordingJob: Job? = null
+    /** Live zoom for gesture accumulation; not pushed through UI state while pinching. */
+    private var currentZoom = 1f
     private var audioPermissionAsked = false
     private var pendingRecordConfig: VideoConfig? = null
 
@@ -98,7 +97,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
             preview = textureView
             // Queued before start(), so restored preferences are honoured from the first session.
             it.setPreferredAspect(prefs.aspect)
-            it.setPreferredPhotoSize(prefs.photoResolution)
+            it.setExportFormat(prefs.exportFormat)
             it.setVideoMode(_uiState.value.videoMode)
             it.setDeviceRotation(_uiState.value.deviceRotation)
         }
@@ -122,10 +121,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     fun onPause() {
         resumed = false
         cancelCountdown()
-        recordingJob?.cancel()
-        recordingJob = null
         controller?.stop()
-        _uiState.update { it.copy(recording = false, recordingStarting = false, recordingElapsedMs = 0L) }
+        _uiState.update { it.copy(recording = false, recordingStarting = false) }
     }
 
     fun setPermission(granted: Boolean) {
@@ -234,17 +231,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     }
 
     fun zoomBy(factor: Float) {
-        val s = _uiState.value.cameraState ?: return
-        setZoom(s.zoom * factor)
+        if (_uiState.value.cameraState == null) return
+        setZoom(currentZoom * factor)
     }
 
-    /** Sets the zoom ratio directly, clamped to the active lens's supported range. */
+    /**
+     * Sets the zoom ratio directly, clamped to the active lens's supported range.
+     *
+     * Pinch gestures fire many times per second. The value is kept in a plain field and pushed
+     * straight to the controller, so a pinch never recomposes the camera screen; the next
+     * camera state notification carries the authoritative zoom back into the UI state.
+     */
     fun setZoom(zoom: Float) {
         val s = _uiState.value.cameraState ?: return
         val max = s.lens.maxZoom.coerceAtLeast(1f)
         val next = zoom.coerceIn(1f, max)
-        if (abs(next - s.zoom) < 0.002f) return
-        _uiState.update { it.copy(zoom = next, cameraState = s.copy(zoom = next)) }
+        if (abs(next - currentZoom) < 0.002f) return
+        currentZoom = next
         controller?.setZoom(next)
     }
 
@@ -254,14 +257,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         controller?.setAspect(aspect)
     }
 
-    /** Changes the still JPEG buffer; the controller rebuilds the session for the new size. */
-    fun setPhotoResolution(size: SizeI) {
+    /** Chooses the still container; the largest native JPEG is always the source. */
+    fun setExportFormat(format: ExportFormat) {
         if (_uiState.value.recording || _uiState.value.recordingStarting) return
-        val s = _uiState.value.cameraState ?: return
-        if (size !in s.lens.jpegSizes) return
-        prefs.photoResolution = size
-        _uiState.update { it.copy(cameraState = s.copy(photoResolution = size)) }
-        controller?.setPhotoResolution(size)
+        if (_uiState.value.exportFormat == format) return
+        prefs.exportFormat = format
+        _uiState.update { it.copy(exportFormat = format) }
+        controller?.setExportFormat(format)
     }
 
     /** Reports the viewfinder card aspect so the 2:1 option can fill it. */
@@ -438,6 +440,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     ) {
         // A lens change (or a fallback) can land on a camera that cannot record; leave video mode
         // instead of showing a record button that can never work.
+        currentZoom = state.zoom
         if (_uiState.value.videoMode &&
             VideoMath.availableQualities(state.lens.videoSizes).isEmpty()
         ) {
@@ -449,11 +452,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         _uiState.update {
             it.copy(ready = true, cameraState = state, plan = plan, zoom = state.zoom)
         }
-    }
-
-    override fun onReadout(readout: LiveReadout) {
-        // The ISO/shutter readout is no longer shown in the UI. Keeping it out of the state
-        // avoids recomposing the whole camera screen several times per second.
     }
 
     override fun onCaptureStarted(exposureNs: Long?) {
@@ -480,26 +478,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
             it.copy(
                 recording = true,
                 recordingStarting = false,
-                recordingElapsedMs = 0L,
                 videoQuality = config.quality,
                 videoFps = config.fps
             )
-        }
-        val startedAt = SystemClock.elapsedRealtime()
-        recordingJob?.cancel()
-        recordingJob = viewModelScope.launch {
-            while (true) {
-                delay(200)
-                _uiState.update { it.copy(recordingElapsedMs = SystemClock.elapsedRealtime() - startedAt) }
-            }
         }
         if (!withAudio) emitMessage(message(R.string.recording_without_audio))
     }
 
     override fun onRecordingFinished(uri: Uri?, error: String?) {
-        recordingJob?.cancel()
-        recordingJob = null
-        _uiState.update { it.copy(recording = false, recordingStarting = false, recordingElapsedMs = 0L) }
+        _uiState.update { it.copy(recording = false, recordingStarting = false) }
         if (uri != null) {
             prefs.lastPhoto = uri
             prefs.lastMediaIsVideo = true
@@ -528,7 +515,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
 
     override fun onCleared() {
         countdownJob?.cancel()
-        recordingJob?.cancel()
         controller?.shutdown()
         controller = null
         super.onCleared()

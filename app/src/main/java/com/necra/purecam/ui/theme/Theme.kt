@@ -4,6 +4,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 
 /**
@@ -14,8 +15,11 @@ import androidx.compose.ui.platform.LocalContext
 @Composable
 fun PureCamTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current
+    // Resolving the palette is a resource lookup; keep the instance stable so it never
+    // invalidates every MaterialTheme consumer on recomposition.
+    val colorScheme = remember(context) { dynamicDarkColorScheme(context) }
     MaterialTheme(
-        colorScheme = dynamicDarkColorScheme(context),
+        colorScheme = colorScheme,
         typography = Typography(),
         content = content
     )

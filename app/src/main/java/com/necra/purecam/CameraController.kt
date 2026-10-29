@@ -30,6 +30,7 @@ import com.necra.purecam.core.CameraState
 import com.necra.purecam.core.CaptureIntent
 import com.necra.purecam.core.ExposureMath
 import com.necra.purecam.core.ExposureMode
+import com.necra.purecam.core.ExportFormat
 import com.necra.purecam.core.Facing
 import com.necra.purecam.core.FocusMath
 import com.necra.purecam.core.FocusMode
@@ -40,12 +41,14 @@ import com.necra.purecam.core.OrientationMath
 import com.necra.purecam.core.RangeI
 import com.necra.purecam.core.RequestBuilder
 import com.necra.purecam.core.RequestSpec
-import com.necra.purecam.core.SizeI
 import com.necra.purecam.core.VideoConfig
 import com.necra.purecam.core.VideoMath
 import com.necra.purecam.core.WhiteBalanceMode
 import java.util.concurrent.Executor
 import kotlin.math.roundToInt
+
+/** How often the manual-control readout is sampled while the preview runs. */
+private const val READOUT_INTERVAL_MS = 200L
 
 class CameraController(
     private val context: Context,
@@ -59,7 +62,6 @@ class CameraController(
             plan: AspectPlan?,
             strategy: LensMode
         )
-        fun onReadout(readout: LiveReadout)
         fun onCaptureStarted(exposureNs: Long?)
         fun onCaptureFinished(uri: Uri?, error: String?)
         fun onRecordingStarted(config: VideoConfig, withAudio: Boolean)
@@ -145,9 +147,9 @@ class CameraController(
     @Volatile
     private var preferredAspect: Aspect = Aspect.R4_3
 
-    /** Selected still buffer restored on the next start; null means the largest size. */
+    /** Container written for still captures; the sensor stream itself stays JPEG. */
     @Volatile
-    private var preferredPhotoSize: SizeI? = null
+    private var exportFormat: ExportFormat = ExportFormat.JPEG
 
     /** Viewfinder card aspect (width / height) used by the 2:1 fullscreen framing. */
     @Volatile
@@ -169,7 +171,7 @@ class CameraController(
 
     private var lastTransform: FloatArray? = null
     private var lastAutoGains: FloatArray? = null
-    private var lastReadoutPostMs = 0L
+    private var lastReadoutMs = 0L
     private var lastVerification = "No still capture yet."
     private var lastIssues: List<String> = emptyList()
 
@@ -203,7 +205,7 @@ class CameraController(
             photoAspect = photo
             preferredAspect = photo
             val base = when {
-                previous == null -> CameraState.defaults(lens, preferredPhotoSize)
+                previous == null -> CameraState.defaults(lens)
                 previous.lens.id == lens.id -> previous
                 else -> previous.withLens(lens)
             }
@@ -317,36 +319,9 @@ class CameraController(
         cameraHandler.post { preferredAspect = aspect }
     }
 
-    /** Restores the persisted still resolution before the first session is built. */
-    fun setPreferredPhotoSize(size: SizeI?) {
-        cameraHandler.post { preferredPhotoSize = size }
-    }
-
-    /**
-     * Changes the still JPEG buffer. Unlike the aspect this changes the ImageReader size, so
-     * the session is rebuilt when the camera is already open.
-     */
-    fun setPhotoResolution(size: SizeI?) {
-        cameraHandler.post {
-            if (recording || capturing) return@post
-            val s = state ?: return@post
-            val valid = size?.takeIf { it in s.lens.jpegSizes }
-            if (s.photoResolution == valid) return@post
-            preferredPhotoSize = valid
-            state = s.copy(photoResolution = valid)
-            currentPlan = AspectMath.plan(
-                s.lens,
-                s.aspect,
-                screenAspect(),
-                fullscreenAspect = fullscreenAspect,
-                jpegSize = valid
-            )
-            notifyState()
-            if (device != null) {
-                closeSessionAndReader()
-                createSession()
-            }
-        }
+    /** Chooses the still container. No session change: the sensor stream stays JPEG. */
+    fun setExportFormat(format: ExportFormat) {
+        cameraHandler.post { exportFormat = format }
     }
 
     /**
@@ -364,8 +339,7 @@ class CameraController(
                 s.lens,
                 s.aspect,
                 screenAspect(),
-                fullscreenAspect = aspect,
-                jpegSize = s.photoResolution
+                fullscreenAspect = aspect
             )
             notifyState()
         }
@@ -385,8 +359,7 @@ class CameraController(
                 s.lens,
                 aspect,
                 screenAspect(),
-                fullscreenAspect = fullscreenAspect,
-                jpegSize = s.photoResolution
+                fullscreenAspect = fullscreenAspect
             )
             notifyState()
         }
@@ -893,8 +866,7 @@ class CameraController(
             s.lens,
             s.aspect,
             screenAspect(),
-            fullscreenAspect = fullscreenAspect,
-            jpegSize = s.photoResolution
+            fullscreenAspect = fullscreenAspect
         )
         val plan = if (videoMode) {
             resolveVideoConfig(s.lens)?.let { AspectMath.planForOutput(s.lens, it.size) }
@@ -1424,7 +1396,8 @@ class CameraController(
         }
     }
 
-    private val stillCallback = object : CameraCaptureSession.CaptureCallback() {        override fun onCaptureCompleted(
+    private val stillCallback = object : CameraCaptureSession.CaptureCallback() {
+        override fun onCaptureCompleted(
             session: CameraCaptureSession,
             request: CaptureRequest,
             result: TotalCaptureResult
@@ -1459,18 +1432,18 @@ class CameraController(
     }
 
     private fun handleResult(result: TotalCaptureResult) {
+        if (capturing) maybeFireCapture(false)
+        // The readout is only needed when the manual controls ask for a starting value, so
+        // sample it a few times a second instead of allocating on every preview frame.
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastReadoutMs <= READOUT_INTERVAL_MS) return
+        lastReadoutMs = now
         val readout = ProcessingVerifier.read(result)
         latestReadout = readout
         val s = state
         if (s != null && s.wb is WhiteBalanceMode.Auto) {
-            readout.transform?.let { lastTransform = it.copyOf() }
-            readout.gains?.let { lastAutoGains = it.copyOf() }
-        }
-        if (capturing) maybeFireCapture(false)
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastReadoutPostMs > 200) {
-            lastReadoutPostMs = now
-            mainHandler.post { listener.onReadout(readout) }
+            readout.transform?.let { lastTransform = it }
+            readout.gains?.let { lastAutoGains = it }
         }
     }
 
@@ -1492,7 +1465,12 @@ class CameraController(
             // seconds on a busy device, so stop it here; saving reports its own result.
             captureWatchdog?.let { cameraHandler.removeCallbacks(it) }
             captureWatchdog = null
-            saver.save(bytes, cropAspect = stillCropAspect, orientationDegrees = stillOrientation)
+            saver.save(
+                bytes,
+                cropAspect = stillCropAspect,
+                orientationDegrees = stillOrientation,
+                format = exportFormat
+            )
         } catch (t: Throwable) {
             Log.e(tag, "JPEG read failed", t)
             failCapture("Could not read JPEG: ${t.message}")

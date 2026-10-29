@@ -155,19 +155,15 @@ class AspectMathTest {
     }
 
     @Test
-    fun plan_usesSelectedJpegSizeWhenProvided() {
-        val profile = TestProfiles.lens(sensorOrientation = 90)
-        val selected = SizeI(4000, 2250)
-
-        val plan = AspectMath.plan(
-            profile,
-            Aspect.R4_3,
-            screenAspect = 0.5f,
-            jpegSize = selected
+    fun plan_alwaysUsesTheLargestJpegBuffer() {
+        val profile = TestProfiles.lens(
+            sensorOrientation = 90,
+            jpegSizes = listOf(SizeI(4000, 3000), SizeI(4000, 2250), SizeI(3000, 3000))
         )
 
-        assertEquals(selected, plan.jpegSize)
-        assertEquals(SizeI(1920, 1080), plan.previewSize)
+        val plan = AspectMath.plan(profile, Aspect.R16_9, screenAspect = 0.5f)
+
+        assertEquals(SizeI(4000, 3000), plan.jpegSize)
     }
 
     @Test

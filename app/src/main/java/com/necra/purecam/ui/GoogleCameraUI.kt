@@ -1,14 +1,18 @@
 package com.necra.purecam.ui
 
 import android.net.Uri
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
@@ -28,16 +33,23 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.necra.purecam.R
@@ -49,6 +61,8 @@ import com.necra.purecam.core.WhiteBalanceMode
 import com.necra.purecam.presentation.CameraUiState
 import com.necra.purecam.presentation.CaptureMode
 import com.necra.purecam.presentation.TimerMode
+import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
 // Google Camera (Pixel) UI colours, taken from new-activity_camera.xml.
 private val CamBg = Color(0xFF000000)
@@ -98,6 +112,38 @@ fun GoogleCameraUI(
     val aspect = state.cameraState?.aspect ?: Aspect.R4_3
     val whiteBalanceActive = state.cameraState?.wb !is WhiteBalanceMode.Auto
 
+    // Ratio the viewfinder window shows. It snaps to the first real plan, so launching with a
+    // saved ratio never plays a narrow-to-wide animation, and animates only on user changes.
+    val targetAspect = state.plan?.displayAspect
+        ?.takeIf { it.isFinite() && it > 0.1f && it < 10f }
+        ?: (4f / 3f)
+    val frameAspect = remember { Animatable(targetAspect) }
+    var aspectPrimed by remember { mutableStateOf(false) }
+    LaunchedEffect(targetAspect, state.plan != null) {
+        if (!aspectPrimed) {
+            frameAspect.snapTo(targetAspect)
+            if (state.plan != null) aspectPrimed = true
+        } else if (frameAspect.value != targetAspect) {
+            frameAspect.animateTo(
+                targetValue = targetAspect,
+                animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing)
+            )
+        }
+    }
+    val frameAspectState = frameAspect.asState()
+
+    // A WB change is announced for two seconds, then the pill falls back to the live spec.
+    val wbSpec = whiteBalanceLabel(state.cameraState?.wb)
+    var transientSpec by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(wbSpec) {
+        transientSpec = wbSpec
+        if (wbSpec != null) {
+            delay(2_000)
+            transientSpec = null
+        }
+    }
+    val spec = transientSpec ?: defaultSpec(state, aspect)
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -109,48 +155,24 @@ fun GoogleCameraUI(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 88.dp)
+                .onSizeChanged { size ->
+                    if (size.height > 0) {
+                        onFullscreenAspect(size.width.toFloat() / size.height.toFloat())
+                    }
+                }
         ) {
-            Surface(
-                modifier = Modifier.fillMaxSize(),
-                shape = RoundedCornerShape(28.dp),
-                color = CamBg
-            ) {
+            // Plain black card. The preview is clipped by the ratio window itself, so no extra
+            // rounded Surface layer wraps the whole viewfinder (one less layer per frame).
+            Box(modifier = Modifier.fillMaxSize().background(CamBg)) {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    // Aspect-correct preview frame, centred inside the card.
-                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                        val targetAspect = state.plan?.displayAspect
-                            ?.takeIf { it.isFinite() && it > 0.1f && it < 10f }
-                            ?: (4f / 3f)
-                        val frameAspect by animateFloatAsState(
-                            targetValue = targetAspect,
-                            animationSpec = tween(
-                                durationMillis = 260,
-                                easing = FastOutSlowInEasing
-                            ),
-                            label = "viewfinderAspect"
-                        )
-                        val maxW = maxWidth
-                        val maxH = maxHeight
-                        LaunchedEffect(maxW, maxH) {
-                            if (maxH.value > 0f) {
-                                onFullscreenAspect(maxW.value / maxH.value)
-                            }
-                        }
-                        val frameWidth = if (maxW / maxH > frameAspect) maxH * frameAspect else maxW
-                        val frameHeight = frameWidth / frameAspect
-                        val frameShape = RoundedCornerShape(22.dp)
-
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.Center)
-                                .size(width = frameWidth, height = frameHeight)
-                                .clip(frameShape)
-                                .border(1.dp, CamWhite.copy(alpha = 0.16f), frameShape)
-                        ) {
-                            content()
-                            GridOverlay(visible = state.grid)
-                            CountdownOverlay(countdown = state.countdown)
-                        }
+                    // Aspect-correct preview window, centred inside the card.
+                    ViewfinderFrame(
+                        aspect = frameAspectState,
+                        modifier = Modifier.align(Alignment.Center)
+                    ) {
+                        content()
+                        GridOverlay(visible = state.grid)
+                        CountdownOverlay(countdown = state.countdown)
                     }
 
                     // Scrims keep the floating controls readable over bright scenes.
@@ -198,9 +220,7 @@ fun GoogleCameraUI(
                             )
                             TimerButton(timer = state.timer, onClick = onTimer)
                         }
-                        topSpec(state, aspect)?.let { spec ->
-                            SpecPill(text = spec, onClick = onSettings)
-                        }
+                        SpecPill(text = spec, onClick = onSettings)
                         Row(
                             modifier = Modifier.weight(1f),
                             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
@@ -222,7 +242,6 @@ fun GoogleCameraUI(
                     // Recording indicator.
                     if (state.recording) {
                         RecordingPill(
-                            elapsedMs = state.recordingElapsedMs,
                             modifier = Modifier
                                 .align(Alignment.TopCenter)
                                 .padding(top = 60.dp)
@@ -299,16 +318,25 @@ private fun CircleIconButton(
     active: Boolean = false,
     enabled: Boolean = true
 ) {
-    val tint = when {
-        !enabled -> CamWhite.copy(alpha = 0.35f)
-        active -> CamOnAccent
-        else -> CamWhite
-    }
+    val tint by animateColorAsState(
+        targetValue = when {
+            !enabled -> CamWhite.copy(alpha = 0.35f)
+            active -> CamOnAccent
+            else -> CamWhite
+        },
+        animationSpec = tween(160),
+        label = "circleIconTint"
+    )
+    val background by animateColorAsState(
+        targetValue = if (active) CamAccent else CamScrim,
+        animationSpec = tween(160),
+        label = "circleIconBg"
+    )
     Box(
         modifier = Modifier
             .size(40.dp)
             .clip(CircleShape)
-            .background(if (active) CamAccent else CamScrim)
+            .background(background)
             .hapticClickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -354,40 +382,85 @@ private fun TimerButton(timer: TimerMode, onClick: () -> Unit) {
     }
 }
 
-/** One-line status: active WB preset, or the current photo/video spec when WB is automatic. */
-private fun topSpec(state: CameraUiState, aspect: Aspect): String? = when (val wb = state.cameraState?.wb) {
+/** White-balance label shown briefly after the preset changes, or null when WB is automatic. */
+private fun whiteBalanceLabel(wb: WhiteBalanceMode?): String? = when (wb) {
     is WhiteBalanceMode.Preset -> wb.preset.label
     is WhiteBalanceMode.Kelvin -> "${wb.kelvin} K"
-    else -> if (state.videoMode) {
-        state.videoConfig?.let { "${it.quality.label} · ${it.fps} fps" }
-    } else {
-        state.plan?.let { plan ->
-            val saved = AspectMath.savedSize(plan, state.lens?.sensorOrientation ?: 0)
-            "${aspect.label} · ${saved.width}×${saved.height}"
+    else -> null
+}
+
+/** The steady-state status: the photo crop size or the video quality/frame rate. */
+private fun defaultSpec(state: CameraUiState, aspect: Aspect): String? = if (state.videoMode) {
+    state.videoConfig?.let { "${it.quality.label} · ${it.fps} fps" }
+} else {
+    state.plan?.let { plan ->
+        val saved = AspectMath.savedSize(plan, state.lens?.sensorOrientation ?: 0)
+        "${aspect.label} · ${saved.width}×${saved.height}"
+    }
+}
+
+/**
+ * Fixed-width status pill. The width never changes, so the top row stays put while the label
+ * cross-fades between the WB preset and the live spec.
+ */
+@Composable
+private fun SpecPill(text: String?, onClick: () -> Unit) {
+    AnimatedContent(
+        targetState = text,
+        transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(90)) },
+        label = "specPill"
+    ) { value ->
+        Box(
+            modifier = Modifier
+                .width(124.dp)
+                .height(34.dp)
+                .clip(CircleShape)
+                .background(if (value != null) CamScrim else Color.Transparent)
+                .hapticClickable(enabled = value != null, onClick = onClick)
+                .padding(horizontal = 10.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            if (value != null) {
+                Text(
+                    text = value,
+                    color = CamWhite.copy(alpha = 0.92f),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }
 
+/**
+ * Centred, aspect-correct preview window. The ratio is read in the layout phase, so animating
+ * it only re-lays-out the window and never recomposes the preview subtree.
+ */
 @Composable
-private fun SpecPill(text: String, onClick: () -> Unit) {
+private fun ViewfinderFrame(
+    aspect: State<Float>,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    val shape = RoundedCornerShape(22.dp)
     Box(
-        modifier = Modifier
-            .height(34.dp)
-            .widthIn(max = 120.dp)
-            .clip(CircleShape)
-            .background(CamScrim)
-            .hapticClickable(onClick = onClick)
-            .padding(horizontal = 12.dp),
-        contentAlignment = Alignment.Center
+        modifier = modifier
+            .layout { measurable, constraints ->
+                val ratio = aspect.value.coerceIn(0.2f, 5f)
+                val maxW = constraints.maxWidth
+                val maxH = constraints.maxHeight
+                val byHeight = (maxH * ratio).roundToInt()
+                val width = if (byHeight in 1..maxW) byHeight else maxW
+                val height = (width / ratio).roundToInt().coerceIn(1, maxH)
+                val placeable = measurable.measure(Constraints.fixed(width, height))
+                layout(width, height) { placeable.place(0, 0) }
+            }
+            .clip(shape)
+            .border(1.dp, CamWhite.copy(alpha = 0.16f), shape)
     ) {
-        Text(
-            text = text,
-            color = CamWhite.copy(alpha = 0.92f),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
+        content()
     }
 }
 
@@ -401,21 +474,32 @@ private fun AspectCycleButton(
     val index = AspectChoices.indexOf(aspect)
     val next = AspectChoices[(index + 1).mod(AspectChoices.size)]
 
+    val labelColor by animateColorAsState(
+        targetValue = if (enabled) CamWhite else CamMuted,
+        animationSpec = tween(160),
+        label = "aspectLabelColor"
+    )
     Box(
         modifier = Modifier
             .height(40.dp)
+            .width(52.dp)
             .clip(CircleShape)
             .background(CamScrim)
-            .hapticClickable(enabled = enabled) { onSelect(next) }
-            .padding(horizontal = 12.dp),
+            .hapticClickable(enabled = enabled) { onSelect(next) },
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = aspect.label,
-            color = if (enabled) CamWhite else CamMuted,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold
-        )
+        AnimatedContent(
+            targetState = aspect.label,
+            transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(80)) },
+            label = "aspectLabel"
+        ) { label ->
+            Text(
+                text = label,
+                color = labelColor,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
     }
 }
 
@@ -438,23 +522,33 @@ private fun LensSegmented(
         ) {
             lenses.forEach { lens ->
                 val selected = lens.id == selectedId
+                val background by animateColorAsState(
+                    targetValue = if (selected) CamAccent else Color.Transparent,
+                    animationSpec = tween(160),
+                    label = "lensBg"
+                )
+                val textColor by animateColorAsState(
+                    targetValue = when {
+                        selected -> CamOnAccent
+                        !enabled -> CamMuted
+                        else -> CamWhite
+                    },
+                    animationSpec = tween(160),
+                    label = "lensText"
+                )
                 Box(
                     modifier = Modifier
                         .height(34.dp)
                         .widthIn(min = 52.dp)
                         .clip(RoundedCornerShape(17.dp))
-                        .background(if (selected) CamAccent else Color.Transparent)
+                        .background(background)
                         .hapticClickable(enabled = enabled) { onSelect(lens) }
                         .padding(horizontal = 12.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = lens.label,
-                        color = when {
-                            selected -> CamOnAccent
-                            !enabled -> CamMuted
-                            else -> CamWhite
-                        },
+                        color = textColor,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -515,18 +609,28 @@ private fun BarButton(
     active: Boolean = false
 ) {
     // No border: the old accent outline left a coloured halo over bright scenes.
+    val background by animateColorAsState(
+        targetValue = if (active) CamAccent else CamBarBtn,
+        animationSpec = tween(160),
+        label = "barButtonBg"
+    )
+    val tint by animateColorAsState(
+        targetValue = if (active) CamOnAccent else CamAccent,
+        animationSpec = tween(160),
+        label = "barButtonTint"
+    )
     Box(
         modifier = Modifier
             .size(48.dp)
             .clip(CircleShape)
-            .background(if (active) CamAccent else CamBarBtn)
+            .background(background)
             .hapticClickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Icon(
             painter = painterResource(icon),
             contentDescription = description,
-            tint = if (active) CamOnAccent else CamAccent,
+            tint = tint,
             modifier = Modifier.size(24.dp)
         )
     }
@@ -574,12 +678,20 @@ private fun SegmentButton(
     enabled: Boolean,
     onClick: () -> Unit
 ) {
-    val backgroundColor = if (isSelected) CamAccent else Color.Transparent
-    val iconTint = when {
-        isSelected -> CamOnAccent
-        !enabled -> CamMuted
-        else -> CamWhite
-    }
+    val backgroundColor by animateColorAsState(
+        targetValue = if (isSelected) CamAccent else Color.Transparent,
+        animationSpec = tween(160),
+        label = "segmentBg"
+    )
+    val iconTint by animateColorAsState(
+        targetValue = when {
+            isSelected -> CamOnAccent
+            !enabled -> CamMuted
+            else -> CamWhite
+        },
+        animationSpec = tween(160),
+        label = "segmentTint"
+    )
     val shape = RoundedCornerShape(20.dp)
 
     Surface(

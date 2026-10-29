@@ -2,9 +2,9 @@ package com.necra.purecam.presentation
 
 import android.net.Uri
 import com.necra.purecam.LensCatalog
-import com.necra.purecam.LiveReadout
 import com.necra.purecam.core.AspectPlan
 import com.necra.purecam.core.CameraState
+import com.necra.purecam.core.ExportFormat
 import com.necra.purecam.core.Facing
 import com.necra.purecam.core.LensProfile
 import com.necra.purecam.core.SizeI
@@ -25,7 +25,6 @@ data class CameraUiState(
     val cameraState: CameraState? = null,
     val plan: AspectPlan? = null,
     val catalog: LensCatalog = LensCatalog(emptyMap()),
-    val readout: LiveReadout? = null,
     val capturing: Boolean = false,
     val zoom: Float = 1f,
     val grid: Boolean = false,
@@ -39,27 +38,18 @@ data class CameraUiState(
     val recording: Boolean = false,
     /** True between the record tap and the first encoder frame; a second tap means stop. */
     val recordingStarting: Boolean = false,
-    val recordingElapsedMs: Long = 0L,
     val videoQuality: VideoQuality = VideoQuality.FHD_1080P,
     val videoFps: Int = VideoMath.DEFAULT_FPS,
+    val exportFormat: ExportFormat = ExportFormat.JPEG,
     val audioGranted: Boolean = false
 ) {
     val lens: LensProfile? get() = cameraState?.lens
 
     val lenses: List<LensProfile> get() = lens?.let { catalog.lenses(it.facing) }.orEmpty()
 
-    /** Still buffer in use; null in state means the lens's largest JPEG. */
-    val photoResolution: SizeI?
-        get() = cameraState?.photoResolution ?: lens?.jpegSizes?.maxByOrNull { it.area }
-
-    /** Still resolutions offered in the settings sheet, largest first. */
-    val availablePhotoSizes: List<SizeI>
-        get() {
-            val all = lens?.jpegSizes.orEmpty().sortedByDescending { it.area }
-            val chosen = cameraState?.photoResolution
-            val top = all.take(8)
-            return if (chosen != null && chosen !in top) top + chosen else top
-        }
+    /** Still buffer in use: always the lens's largest JPEG, cropped to the selected ratio. */
+    val photoSize: SizeI?
+        get() = lens?.jpegSizes?.maxByOrNull { it.area }
 
     val facing: Facing? get() = lens?.facing
 
