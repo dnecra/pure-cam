@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">RawCam</string>
+    <string name="app_name">Pure Cam</string>
     <string name="camera_permission_title">Camera permission required</string>
-    <string name="camera_permission_body">RawCam needs the camera to take photos. Only the camera permission is requested.</string>
+    <string name="camera_permission_body">Pure Cam needs the camera to take photos. Only the camera permission is requested.</string>
     <string name="grant_permission">Grant permission</string>
     <string name="open_settings">Open settings</string>
     <string name="shutter">Take photo</string>

@@ -1,0 +1,437 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Google Camera (Pixel) UI replica - portrait, dark theme.
+  Reference size: 418 x 932 px screenshot (~ 392 x 872 dp on a Pixel).
+  Requires: Material Components (com.google.android.material), CameraX PreviewView.
+
+  Colors (put in res/values/colors.xml):
+    cam_bg            #000000   screen background
+    cam_scrim         #99202124 translucent dark pill/circle on top of viewfinder
+    cam_bar_btn       #FF2B2B2D bottom bar button background
+    cam_accent        #FFA8C7FA light blue (selected chip / selected segment)
+    cam_on_accent     #FF041E49 text/icon on accent
+    cam_white         #FFFFFFFF
+
+  Drawables you must provide (24dp vector icons, white unless noted):
+    ic_flash_off, ic_moon, ic_motion_off (top-right), ic_settings,
+    ic_camera (selected segment, tinted cam_on_accent), ic_screen (other segment),
+    ic_tune, ic_flip_camera
+
+  Layout structure:
+    1. Viewfinder card: 10dp side margins, 28dp corner radius, clips PreviewView.
+    2. Overlays inside the card: top controls, zoom pill, mode row, shutter row.
+    3. Bottom bar BELOW the card (outside the rounded border).
+-->
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/cam_bg"
+    android:fitsSystemWindows="true">
+
+    <!-- ============ 1. VIEWFINDER CARD (rounded border) ============ -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/viewfinderCard"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_marginStart="10dp"
+        android:layout_marginEnd="10dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="12dp"
+        app:cardBackgroundColor="@color/cam_bg"
+        app:cardCornerRadius="28dp"
+        app:cardElevation="0dp"
+        app:strokeWidth="0dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/bottomBar"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <androidx.constraintlayout.widget.ConstraintLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <!-- Camera preview -->
+            <androidx.camera.view.PreviewView
+                android:id="@+id/previewView"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                app:scaleType="fillCenter"
+                app:implementationMode="compatible"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent" />
+
+            <!-- ---------- TOP: flash | low-light pill | motion ---------- -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/btnFlash"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="10dp"
+                android:layout_marginTop="10dp"
+                app:cardBackgroundColor="@color/cam_scrim"
+                app:cardCornerRadius="22dp"
+                app:cardElevation="0dp"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintStart_toStartOf="parent">
+                <ImageView
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:layout_gravity="center"
+                    android:contentDescription="Flash off"
+                    android:src="@drawable/ic_flash_off"
+                    app:tint="@color/cam_white" />
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Low light pill: [moon "Low light"] [Try Night] -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/lowLightPill"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:layout_marginTop="13dp"
+                app:cardBackgroundColor="@color/cam_scrim"
+                app:cardCornerRadius="19dp"
+                app:cardElevation="0dp"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent">
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="4dp">
+                    <ImageView
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:src="@drawable/ic_moon"
+                        app:tint="@color/cam_white" />
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:layout_marginEnd="10dp"
+                        android:text="Low light"
+                        android:textColor="@color/cam_white"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+                    <com.google.android.material.card.MaterialCardView
+                        android:id="@+id/chipTryNight"
+                        android:layout_width="wrap_content"
+                        android:layout_height="30dp"
+                        app:cardBackgroundColor="@color/cam_accent"
+                        app:cardCornerRadius="15dp"
+                        app:cardElevation="0dp">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="match_parent"
+                            android:gravity="center"
+                            android:paddingStart="14dp"
+                            android:paddingEnd="14dp"
+                            android:text="Try Night"
+                            android:textColor="@color/cam_on_accent"
+                            android:textSize="16sp"
+                            android:textStyle="bold" />
+                    </com.google.android.material.card.MaterialCardView>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/btnMotion"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginEnd="10dp"
+                android:layout_marginTop="10dp"
+                app:cardBackgroundColor="@color/cam_scrim"
+                app:cardCornerRadius="22dp"
+                app:cardElevation="0dp"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintEnd_toEndOf="parent">
+                <ImageView
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:layout_gravity="center"
+                    android:contentDescription="Motion off"
+                    android:src="@drawable/ic_motion_off"
+                    app:tint="@color/cam_white" />
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- ---------- SHUTTER ROW (anchored to bottom) ---------- -->
+            <!-- Gallery thumbnail (circle, left) -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/thumbnail"
+                android:layout_width="58dp"
+                android:layout_height="58dp"
+                android:layout_marginStart="40dp"
+                app:cardCornerRadius="29dp"
+                app:cardElevation="0dp"
+                app:strokeColor="@color/cam_white"
+                app:strokeWidth="0dp"
+                app:layout_constraintTop_toTopOf="@id/shutterOuter"
+                app:layout_constraintBottom_toBottomOf="@id/shutterOuter"
+                app:layout_constraintStart_toStartOf="parent">
+                <ImageView
+                    android:id="@+id/thumbnailImage"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="centerCrop" />
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Shutter: white ring + white inner disc -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/shutterOuter"
+                android:layout_width="90dp"
+                android:layout_height="90dp"
+                android:layout_marginBottom="16dp"
+                app:cardBackgroundColor="@android:color/transparent"
+                app:cardCornerRadius="45dp"
+                app:cardElevation="0dp"
+                app:strokeColor="@color/cam_white"
+                app:strokeWidth="4dp"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent">
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/shutterInner"
+                    android:layout_width="72dp"
+                    android:layout_height="72dp"
+                    android:layout_gravity="center"
+                    app:cardBackgroundColor="@color/cam_white"
+                    app:cardCornerRadius="36dp"
+                    app:cardElevation="0dp" />
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Flip camera (circle, right) -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/btnFlip"
+                android:layout_width="58dp"
+                android:layout_height="58dp"
+                android:layout_marginEnd="40dp"
+                app:cardBackgroundColor="@color/cam_scrim"
+                app:cardCornerRadius="29dp"
+                app:cardElevation="0dp"
+                app:layout_constraintTop_toTopOf="@id/shutterOuter"
+                app:layout_constraintBottom_toBottomOf="@id/shutterOuter"
+                app:layout_constraintEnd_toEndOf="parent">
+                <ImageView
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_gravity="center"
+                    android:contentDescription="Switch camera"
+                    android:src="@drawable/ic_flip_camera"
+                    app:tint="@color/cam_white" />
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- ---------- MODE ROW: "Night"  [Photo] ---------- -->
+            <LinearLayout
+                android:id="@+id/modeRow"
+                android:layout_width="wrap_content"
+                android:layout_height="42dp"
+                android:layout_marginBottom="14dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                app:layout_constraintBottom_toTopOf="@id/shutterOuter"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent">
+                <TextView
+                    android:id="@+id/modeNight"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="16dp"
+                    android:text="Night"
+                    android:textColor="#CCFFFFFF"
+                    android:textSize="17sp" />
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/modePhoto"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    app:cardBackgroundColor="@color/cam_accent"
+                    app:cardCornerRadius="21dp"
+                    app:cardElevation="0dp">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:paddingStart="18dp"
+                        android:paddingEnd="18dp"
+                        android:text="Photo"
+                        android:textColor="@color/cam_on_accent"
+                        android:textSize="17sp"
+                        android:textStyle="bold" />
+                </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
+
+            <!-- ---------- ZOOM PILL: (1x) 2 ---------- -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/zoomPill"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:layout_marginBottom="12dp"
+                app:cardBackgroundColor="@color/cam_scrim"
+                app:cardCornerRadius="20dp"
+                app:cardElevation="0dp"
+                app:layout_constraintBottom_toTopOf="@id/modeRow"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent">
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp">
+                    <com.google.android.material.card.MaterialCardView
+                        android:id="@+id/zoom1x"
+                        android:layout_width="wrap_content"
+                        android:layout_height="32dp"
+                        app:cardBackgroundColor="@color/cam_accent"
+                        app:cardCornerRadius="16dp"
+                        app:cardElevation="0dp">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="match_parent"
+                            android:gravity="center"
+                            android:minWidth="48dp"
+                            android:text="1×"
+                            android:textColor="@color/cam_on_accent"
+                            android:textSize="15sp"
+                            android:textStyle="bold" />
+                    </com.google.android.material.card.MaterialCardView>
+                    <TextView
+                        android:id="@+id/zoom2x"
+                        android:layout_width="wrap_content"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:minWidth="48dp"
+                        android:text="2"
+                        android:textColor="@color/cam_white"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+        </androidx.constraintlayout.widget.ConstraintLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- ============ 3. BOTTOM BAR (outside the viewfinder) ============ -->
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/bottomBar"
+        android:layout_width="0dp"
+        android:layout_height="80dp"
+        android:layout_marginBottom="14dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <!-- Settings (circle) -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/btnSettings"
+            android:layout_width="54dp"
+            android:layout_height="54dp"
+            android:layout_marginStart="44dp"
+            app:cardBackgroundColor="@color/cam_bar_btn"
+            app:cardCornerRadius="27dp"
+            app:cardElevation="0dp"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent">
+            <ImageView
+                android:layout_width="26dp"
+                android:layout_height="26dp"
+                android:layout_gravity="center"
+                android:contentDescription="Settings"
+                android:src="@drawable/ic_settings"
+                app:tint="@color/cam_accent" />
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Camera / Screen segmented pill -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/segmentPill"
+            android:layout_width="wrap_content"
+            android:layout_height="54dp"
+            app:cardBackgroundColor="@color/cam_bar_btn"
+            app:cardCornerRadius="27dp"
+            app:cardElevation="0dp"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp">
+                <!-- Selected: camera -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/segCamera"
+                    android:layout_width="64dp"
+                    android:layout_height="46dp"
+                    app:cardBackgroundColor="@color/cam_accent"
+                    app:cardCornerRadius="23dp"
+                    app:cardElevation="0dp">
+                    <ImageView
+                        android:layout_width="26dp"
+                        android:layout_height="26dp"
+                        android:layout_gravity="center"
+                        android:src="@drawable/ic_camera"
+                        app:tint="@color/cam_on_accent" />
+                </com.google.android.material.card.MaterialCardView>
+                <!-- Unselected: second mode -->
+                <FrameLayout
+                    android:id="@+id/segOther"
+                    android:layout_width="64dp"
+                    android:layout_height="46dp">
+                    <ImageView
+                        android:layout_width="26dp"
+                        android:layout_height="26dp"
+                        android:layout_gravity="center"
+                        android:src="@drawable/ic_screen"
+                        app:tint="@color/cam_white" />
+                </FrameLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Tune / quick settings (circle) + blue notification dot -->
+        <FrameLayout
+            android:layout_width="54dp"
+            android:layout_height="54dp"
+            android:layout_marginEnd="44dp"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/btnTune"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                app:cardBackgroundColor="@color/cam_bar_btn"
+                app:cardCornerRadius="27dp"
+                app:cardElevation="0dp">
+                <ImageView
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
+                    android:layout_gravity="center"
+                    android:contentDescription="Quick settings"
+                    android:src="@drawable/ic_tune"
+                    app:tint="@color/cam_accent" />
+            </com.google.android.material.card.MaterialCardView>
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="10dp"
+                android:layout_height="10dp"
+                android:layout_gravity="top|end"
+                android:layout_marginTop="6dp"
+                android:layout_marginEnd="6dp"
+                app:cardBackgroundColor="#FF5B9DFF"
+                app:cardCornerRadius="5dp"
+                app:cardElevation="0dp" />
+        </FrameLayout>
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+    <!-- Home indicator area is handled by the system gesture bar (fitsSystemWindows). -->
+</androidx.constraintlayout.widget.ConstraintLayout>

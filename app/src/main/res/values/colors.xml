@@ -20,4 +20,12 @@
     <color name="ui_scrim">#A6000000</color>
     <color name="ui_ripple">#33FFFFFF</color>
     <color name="ui_border">#80FFFFFF</color>
+
+    <!-- Google Camera UI colors (for new design) -->
+    <color name="cam_bg">#000000</color>
+    <color name="cam_scrim">#99202124</color>
+    <color name="cam_bar_btn">#FF2B2B2D</color>
+    <color name="cam_accent">#FFA8C7FA</color>
+    <color name="cam_on_accent">#FF041E49</color>
+    <color name="cam_white">#FFFFFFFF</color>
 </resources>

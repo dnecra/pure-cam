@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.rawcam"
+    namespace = "com.necra.purecam"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.rawcam"
+        applicationId = "com.necra.purecam"
         minSdk = 34
         targetSdk = 34
         versionCode = 1
