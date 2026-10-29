@@ -31,6 +31,12 @@ object TestProfiles {
             SizeI(1280, 960),
             SizeI(1920, 1080)
         ),
+        videoSizes: List<SizeI> = listOf(
+            SizeI(3840, 2160),
+            SizeI(1920, 1080),
+            SizeI(1280, 720)
+        ),
+        videoFpsRanges: List<IntRange> = listOf(24..24, 30..30, 60..60),
         isoRange: RangeI? = RangeI(50, 3200),
         maxAnalogIso: Int? = 800,
         exposureRange: RangeL? = RangeL(100_000L, 1_000_000_000L),
@@ -73,6 +79,8 @@ object TestProfiles {
         pixelArray = activeArray,
         jpegSizes = jpegSizes,
         previewSizes = previewSizes,
+        videoSizes = videoSizes,
+        videoFpsRanges = videoFpsRanges,
         isoRange = isoRange,
         maxAnalogIso = maxAnalogIso,
         exposureRange = exposureRange,

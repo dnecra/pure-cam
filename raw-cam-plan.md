@@ -1,5 +1,11 @@
 # RawCam: Development Plan (v3)
 
+> **Status update:** the UI was rewritten on Jetpack Compose with Material You (dynamic colour) and a leaner feature set. This document remains the reference for the Camera2 pipeline and the "no processing" philosophy; see `README.md` for the current architecture and UI.
+>
+> **Extension:** video recording, plus resolution and frame-rate settings, was added on top of
+> the still pipeline. See §12 for the design and verification results. Video was a non-goal in
+> the original plan; it deliberately reuses the same "no processing" request builder.
+
 A minimal Android camera app that takes normal JPEG photos with **every optional processing step turned off**, now with **ultrawide / telephoto lens selection** and **manual ISO, shutter speed, focus and white balance**. Photos are saved to `/DCIM` like a normal camera.
 
 > **Changes from v2:** lens selection (ultrawide / main / telephoto) and manual controls (ISO, shutter, focus, white balance) move from "future ideas" into the core scope. This adds a per-lens capability model, a single pure function that turns app state into camera requests, and a bigger device-testing effort. Timeline grows from ~6-8 days to ~15-20 days.
@@ -460,7 +466,8 @@ APK size, cold start, shutter-to-saved latency, memory during rapid capture, and
 - [ ] Requested manual values are confirmed in capture results and EXIF on test devices.
 - [ ] Every photo is saved as JPEG in `DCIM/Camera` and appears in the system gallery.
 - [ ] All supported processing stages are requested OFF and confirmed through capture results; the app never decodes, crops, rotates, or re-encodes the image.
-- [ ] Only the `CAMERA` permission is requested.
+- [ ] Video records through the same request builder and saves a playable MP4 in `DCIM/Camera`; resolution and frame rate come only from the lens's advertised streams/ranges.
+- [ ] Only `CAMERA` is requested at launch (`RECORD_AUDIO` is optional and requested lazily for video).
 - [ ] Verified on at least three devices from different manufacturers, each with multiple back lenses.
 
 ---
@@ -473,3 +480,72 @@ APK size, cold start, shutter-to-saved latency, memory during rapid capture, and
 - Focus peaking and histogram overlays.
 - Exposure bracketing and self-timer.
 - Optional geotag.
+
+---
+
+## 12. Video Recording (implemented extension)
+
+### 12.1 Goal
+
+Record through the *same* pipeline as stills: the optional processing stages stay off, and the
+app never post-processes the file. The clip must land in `DCIM/Camera` like a stock camera and
+must be simple enough to stay inside the lean feature set: one mode switch, one record button,
+one settings sheet.
+
+### 12.2 Design
+
+| Topic | Decision |
+|-------|----------|
+| Encoder | Framework `MediaRecorder`, H.264 in MPEG-4. No CameraX, no MediaCodec pipeline of our own. |
+| Camera output | A second `Surface` from `MediaRecorder` added to a `TEMPLATE_RECORD` session (preview + recorder only). |
+| Saving | Pending MediaStore row (`IS_PENDING=1`) opened as a `ParcelFileDescriptor`; published on stop, deleted on cancel/failure. |
+| Orientation | `setOrientationHint()` from `SENSOR_ORIENTATION` + device rotation, same math as still EXIF. |
+| Processing | `RequestBuilder` with `CaptureIntent.RECORD`: NR/EDGE/HOT/CA/DIST/EIS off, neutral tone map, linear CCM. Flash becomes a steady torch. |
+| Frame rate | Pinned with `CONTROL_AE_TARGET_FPS_RANGE`, but only using a range the device advertises (`VideoMath.aeRangeFor`); never invented. |
+| Manual exposure | Clamped to one frame duration (ISO raised to preserve brightness); the video-mode preview uses the same clamp so it is WYSIWYG. |
+| Framing | Video forces a 16:9 plan (`AspectMath.planForOutput`) and restores the saved photo aspect on exit. |
+| Resolution | `VideoQuality` candidates (4K/1080p/720p) matched against the lens's own encoder stream map; the canonical buffer (e.g. 3840×2160) is preferred over a 16:9 sensor crop. |
+| Audio | `RECORD_AUDIO` requested lazily on the first record. Declining records silently; if `prepare()` fails with audio, the recorder retries the same settings without sound. |
+| Short taps | `VideoMath.MIN_RECORDING_MS = 500`: a quicker stop is deferred so the MP4 header is valid. |
+| Lifecycle | Pause/teardown finalizes and publishes the clip. A record tap that arrives while the session is reopening is queued and started from `onConfigured` (needed for the audio-permission dialog, which pauses the activity). |
+| Events/diagnostics | `RawCam/Video` logs prepare/start/save; the first record frame is verified and logged like a still (`Video recording:`). |
+
+### 12.3 Files added
+
+```
+core/VideoMath.kt              Qualities, size/fps matching, AE range, bitrate, duration, clamp
+VideoRecorder.kt               MediaRecorder -> pending MediaStore MP4
+ui/VideoSettingsSheet.kt       Resolution / frame-rate sheet
+ui/Controls.kt                 Mode switch, record shutter, quality pill, recording pill
+presentation/CameraUiState.kt  CaptureMode, videoConfig, available qualities/fps
+data/UiPreferences.kt          Mode, quality, fps, last-media persistence
+test/.../VideoMathTest.kt      20+ pure tests
+```
+
+### 12.4 Verification
+
+Emulator (API 36, virtual scene `camera:10`, 1280×720 only):
+
+- 720p30 record → 22.8 s MP4, 2.25 MB, `is_pending=0`, all processing flags verified off.
+- Granting the lazy audio prompt starts the queued recording without an error; denying it
+  records silently and reports "Recording without sound".
+- Quick record→stop still saves a valid 769 ms clip; Home mid-recording publishes the clip.
+- Switching back to Photo restores the 4:3 plan (`1280×960`).
+
+Pixel 5 (Android 14):
+
+- Settings sheet offers 4K / 1080p / 720p and 24 / 30 / 60 fps (all advertised by the lens).
+- 1080p60 and 4K60 (`3840×2160`) with audio, `PHYS=2`, all processing flags off; MediaStore
+  rows report the expected dimensions, duration and size.
+- The first attempt at 4K used the sensor's 4032×2268 crop and the HAL rejected the stream
+  combination; preferring the canonical 3840×2160 buffer fixed 4K60.
+- Still capture at 4032×3024 remains unchanged (12 MB JPEG, bytes untouched).
+
+### 12.5 Limitations
+
+- One clip per tap: no pause/resume, no audio toggle, no trimming, H.264 only.
+- Fixed 16:9 in video mode; photo aspect is restored on exit.
+- Quality/fps choices are strictly what the device advertises; there is no cross-check that a
+  particular size supports a particular frame rate, so an exotic combination can still be
+  rejected by the HAL (the clip is then discarded with a "Recording failed" message).
+- Some devices expose no wide encoder stream on a lens; that lens hides the mode switch.

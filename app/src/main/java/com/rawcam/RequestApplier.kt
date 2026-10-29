@@ -33,8 +33,11 @@ object RequestApplier {
         builder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
         builder.set(
             CaptureRequest.CONTROL_CAPTURE_INTENT,
-            if (still) CameraMetadata.CONTROL_CAPTURE_INTENT_STILL_CAPTURE
-            else CameraMetadata.CONTROL_CAPTURE_INTENT_PREVIEW
+            when (spec.intent) {
+                CaptureIntent.STILL -> CameraMetadata.CONTROL_CAPTURE_INTENT_STILL_CAPTURE
+                CaptureIntent.RECORD -> CameraMetadata.CONTROL_CAPTURE_INTENT_VIDEO_RECORD
+                CaptureIntent.PREVIEW -> CameraMetadata.CONTROL_CAPTURE_INTENT_PREVIEW
+            }
         )
         builder.set(CaptureRequest.CONTROL_EFFECT_MODE, CameraMetadata.CONTROL_EFFECT_MODE_OFF)
 
@@ -47,8 +50,15 @@ object RequestApplier {
         }
         builder.set(
             CaptureRequest.FLASH_MODE,
-            if (spec.flashSingle) CameraMetadata.FLASH_MODE_SINGLE else CameraMetadata.FLASH_MODE_OFF
+            when {
+                spec.torch -> CameraMetadata.FLASH_MODE_TORCH
+                spec.flashSingle -> CameraMetadata.FLASH_MODE_SINGLE
+                else -> CameraMetadata.FLASH_MODE_OFF
+            }
         )
+        spec.aeFps?.let {
+            builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, android.util.Range(it.min, it.max))
+        }
         spec.iso?.let { builder.set(CaptureRequest.SENSOR_SENSITIVITY, it) }
         spec.exposureNs?.let { builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, it) }
         spec.frameDurationNs?.let { builder.set(CaptureRequest.SENSOR_FRAME_DURATION, it) }

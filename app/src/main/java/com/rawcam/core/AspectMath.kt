@@ -64,9 +64,31 @@ object AspectMath {
         )
     }
 
+    /**
+     * Plan for a fixed output buffer, such as a video encoder surface. The preview keeps the
+     * same aspect so what the user frames is exactly what gets recorded.
+     */
+    fun planForOutput(
+        profile: LensProfile,
+        output: SizeI,
+        previewSizes: List<SizeI> = profile.previewSizes,
+        maxPreviewWidth: Int = 1920
+    ): AspectPlan {
+        val outputAspect = output.aspect
+        val preview = previewSize(previewSizes, outputAspect, maxPreviewWidth) ?: output
+        val display = if (profile.sensorOrientation % 180 == 90) 1f / outputAspect else outputAspect
+        return AspectPlan(
+            targetAspect = outputAspect,
+            outputAspect = outputAspect,
+            jpegSize = output,
+            previewSize = preview,
+            crop = cropRect(profile.activeArray, outputAspect, 1f),
+            displayAspect = display
+        )
+    }
+
     /** Largest size whose aspect is closest to [target]. */
-    fun bestSize(sizes: List<SizeI>, target: Float): SizeI? {
-        if (sizes.isEmpty()) return null
+    fun bestSize(sizes: List<SizeI>, target: Float): SizeI? {        if (sizes.isEmpty()) return null
         return sizes.minWithOrNull(
             compareBy<SizeI> { relativeAspectError(it.aspect, target) }
                 .thenByDescending { it.area }

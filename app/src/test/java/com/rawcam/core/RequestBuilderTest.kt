@@ -18,7 +18,10 @@ class RequestBuilderTest {
         strategy: LensMode = state.lens.mode,
         previewClamp: Boolean = true,
         focusAssist: Boolean = false,
-        fallbackTransform: FloatArray? = null
+        fallbackTransform: FloatArray? = null,
+        videoFps: Int? = null,
+        videoFpsRange: RangeI? = null,
+        videoMode: Boolean = false
     ): RequestSpec = RequestBuilder.build(
         state = state,
         profile = state.lens,
@@ -27,7 +30,10 @@ class RequestBuilderTest {
         strategy = strategy,
         previewClamp = previewClamp,
         focusAssist = focusAssist,
-        fallbackTransform = fallbackTransform
+        fallbackTransform = fallbackTransform,
+        videoFps = videoFps,
+        videoFpsRange = videoFpsRange,
+        videoMode = videoMode
     )
 
     @Test
@@ -341,5 +347,92 @@ class RequestBuilderTest {
         assertNotNull(wb.transform)
         assertEquals(0.25f, wb.transform[0], 0f)
         assertEquals(0.25f, wb.transform[8], 0f)
+    }
+
+    @Test
+    fun record_usesAutoExposureTorchAndPinnedFrameRate() {
+        val state = TestProfiles.manualState(lens, iso = 200, shutterNs = 8_000_000L, flash = true)
+
+        val spec = build(
+            state,
+            intent = CaptureIntent.RECORD,
+            videoFps = 30,
+            videoFpsRange = RangeI(30, 30)
+        )
+
+        assertEquals(CaptureIntent.RECORD, spec.intent)
+        // Manual exposure is still honored, but the torch replaces single-flash and AE stays off.
+        assertEquals(AeMode.OFF, spec.aeMode)
+        assertEquals(200, spec.iso)
+        assertEquals(8_000_000L, spec.exposureNs)
+        assertTrue(spec.torch)
+        assertFalse(spec.flashSingle)
+        assertEquals(RangeI(30, 30), spec.aeFps)
+        assertEquals(33_333_333L, spec.frameDurationNs)
+        assertFalse(spec.needPrecapture)
+    }
+
+    @Test
+    fun recordWithAutoExposure_doesNotUseFlashModes() {
+        val spec = build(
+            TestProfiles.autoState(lens, flash = true),
+            intent = CaptureIntent.RECORD,
+            videoFps = 24,
+            videoFpsRange = RangeI(24, 24)
+        )
+
+        assertEquals(AeMode.AUTO, spec.aeMode)
+        assertTrue(spec.torch)
+        assertFalse(spec.flashSingle)
+        assertFalse(spec.needPrecapture)
+        assertEquals(RangeI(24, 24), spec.aeFps)
+        assertEquals(41_666_666L, spec.frameDurationNs)
+    }
+
+    @Test
+    fun recordWithoutFlash_hasNoTorch() {
+        val spec = build(
+            TestProfiles.autoState(lens, flash = false),
+            intent = CaptureIntent.RECORD,
+            videoFps = 30
+        )
+
+        assertFalse(spec.torch)
+        assertEquals(RangeI(30, 30), spec.aeFps)
+    }
+
+    @Test
+    fun recordClampsLongManualShutterToFrameDuration() {
+        val state = TestProfiles.manualState(lens, iso = 100, shutterNs = 100_000_000L)
+
+        val spec = build(state, intent = CaptureIntent.RECORD, videoFps = 30)
+
+        assertEquals(33_333_333L, spec.exposureNs)
+        // Brightness preserved: 100 ISO x 3 (shutter shortened by the same factor).
+        assertEquals(300, spec.iso)
+        assertFalse(spec.approximatePreview)
+    }
+
+    @Test
+    fun videoModePreview_turnsFlashIntoATorch() {
+        val state = TestProfiles.autoState(lens, flash = true)
+
+        val preview = build(state, intent = CaptureIntent.PREVIEW, videoMode = true)
+        val still = build(state, intent = CaptureIntent.STILL, videoMode = true)
+
+        assertTrue(preview.torch)
+        assertFalse(still.torch)
+        assertFalse(still.flashSingle)
+    }
+
+    @Test
+    fun videoModePreview_clampsManualShutterLikeRecording() {
+        val state = TestProfiles.manualState(lens, iso = 100, shutterNs = 100_000_000L)
+
+        val preview = build(state, intent = CaptureIntent.PREVIEW, videoMode = true, videoFps = 30)
+
+        assertEquals(33_333_333L, preview.exposureNs)
+        assertEquals(300, preview.iso)
+        assertFalse(preview.approximatePreview)
     }
 }

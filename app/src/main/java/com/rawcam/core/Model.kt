@@ -200,6 +200,9 @@ data class LensProfile(
     val pixelArray: RectI?,
     val jpegSizes: List<SizeI>,
     val previewSizes: List<SizeI>,
+    /** Buffers the encoder can consume; empty when the lens cannot record video. */
+    val videoSizes: List<SizeI> = emptyList(),
+    val videoFpsRanges: List<IntRange> = emptyList(),
     val isoRange: RangeI?,
     val maxAnalogIso: Int?,
     val exposureRange: RangeL?,
@@ -236,6 +239,9 @@ data class LensProfile(
 
     val supportsManualFocus: Boolean
         get() = manualSensor && minFocusDiopters > 0f
+
+    val supportsVideo: Boolean
+        get() = videoSizes.isNotEmpty()
 
     val hasMultipleNativeZooms: Boolean
         get() = zoomRatioRange != null

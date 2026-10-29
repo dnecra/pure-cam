@@ -1,17 +1,24 @@
 # RawCam
 
 A deliberately minimal Android camera for Android 14+ built directly on Camera2. It takes
-JPEGs with every optional processing stage switched off, lets you pick the physical lens,
-and gives you manual ISO, shutter, focus and white balance when the device supports them.
+JPEGs with every optional processing stage switched off, records video through the same
+unprocessed pipeline, lets you pick the physical lens, and gives you manual ISO, shutter,
+focus and white balance when the device supports them.
 
-No CameraX, no Compose, no AppCompat, no AndroidX runtime, no third-party libraries.
-The release APK is about **176,097 bytes (~0.18 MB)**.
+The app is written in Kotlin with **Jetpack Compose** and **Material 3 / Material You**:
+the whole UI follows the wallpaper-derived dynamic colour of Android 14, the viewfinder is
+full-bleed, and every transition is declarative and interruptible. No CameraX, no images,
+no icon fonts, no third-party libraries.
+
+The release APK is about **1.8 MB** (unsigned).
 
 ## Requirements
 
 - Android 14 or newer (`minSdk = 34`, `targetSdk = 34`)
 - A camera that exposes JPEG output through Camera2
-- Only the `CAMERA` permission is requested; photos are written through MediaStore
+- `CAMERA` is requested at launch; `RECORD_AUDIO` is requested the first time you record
+  video and may be declined (clips are then silent). Photos and videos are written through
+  MediaStore.
 
 ## Build
 
@@ -42,101 +49,167 @@ adb shell am start -n com.rawcam/.MainActivity
 Photos are saved as `DCIM/Camera/IMG_yyyyMMdd_HHmmss.jpg`. The JPEG bytes are written
 unchanged; orientation is carried in the EXIF tag rather than by rotating pixels.
 
+Videos are saved as `DCIM/Camera/VID_yyyyMMdd_HHmmss.mp4`. MediaRecorder writes the H.264
+stream straight from the camera's recorder surface; the app never re-muxes or re-encodes it.
+
 ## Controls
 
-The UI follows the neutral black-and-yellow `camera-ui.html` mockup: a compact icon-and-label
-row, a centred rounded preview frame, a glass lens capsule, a mode carousel and a classic
-shutter bar. Everything is built from framework views and small custom drawables, so Material
-Components and AndroidX are not needed.
+The camera screen is a full-bleed viewfinder with a floating Material You control layer:
 
-- **Top row** — five icon-and-label controls:
-  - **Flash** — `Off` / `On`, dimmed when the active lens has no flash.
-  - **Timer** — `Off` / `3s` / `10s`. A large countdown is drawn over the preview; the timer is
-    cancelled if the activity pauses.
-  - **RAW** — fixed `On` indicator for the JPEG pipeline with processing disabled. Tapping it
-    shows a short explanation.
-  - **Grid** — `Off` / `3×3`. The overlay preference is persisted.
-  - **Aspect** — `3:4`, `2:3`, `9:16` or `Full`, limited to ratios the camera can write
-    natively. `Full` picks the native ratio closest to the screen.
-- **Preview** — a centred, rounded frame at the selected ratio on a black stage. It shows the
-  live readout (ISO, shutter, focus and WB), the zoom badge, the glass lens capsule, the focus
-  ring, the capture badge, the timer countdown and the shutter flash.
-  - **Tap** to focus and meter (only in Auto focus mode; the AE region matters only while
-    exposure is Auto).
-  - **Pinch** to zoom, relative to the selected lens, up to 5× or the device limit.
-  - **Long-press the readout** to open the capability report for the current lens.
-- **Mode carousel** — `Manual`, `Photo`, `Info`.
-  - **Manual** opens the manual-controls sheet.
-  - **Photo** closes the sheet and returns to the plain preview.
-  - **Info** opens the capability report.
-- **Bottom bar** — gallery thumbnail, shutter and flip.
-  - **Shutter** compresses and rebounds while the photo is saved.
-  - **Thumbnail** shows the last JPEG saved by RawCam and opens it with `ACTION_VIEW`.
-  - **Flip** switches back/front. The front preview is mirrored; the saved JPEG is not.
-- **Lens capsule** — verified physical lenses only (`.6`, `1×`, …), overlaid at the bottom of
-  the preview. It is hidden when the active camera has a single lens; the selected pill turns
-  yellow.
-- **Toast** — feedback appears as an in-app capsule above the lens capsule instead of a system
-  `Toast`.
+- **Gestures**
+  - **Tap** to focus and meter the tap point (auto focus/auto exposure only). A focus ring
+    pulses where you tapped.
+  - **Pinch** to zoom, relative to the selected lens, up to 5× or the device limit. A zoom
+    badge appears while zoomed.
+  - **Double-tap** to toggle between 1× and a quick 2× crop.
+- **Top controls** — four round glass buttons:
+  - **Flash** — on/off, dimmed when the active lens has no flash.
+  - **Timer** — off / 3 s / 10 s. The countdown is drawn over the viewfinder and animates
+    between numbers; pressing the shutter again cancels it.
+  - **Grid** — rule-of-thirds overlay; the preference is persisted.
+  - **Manual controls** — opens the manual sheet. The button is accented while any
+    control is out of Auto.
+- **Readout** — a small glass pill under the top row shows the live ISO and shutter.
+- **Lens pills** — verified physical lenses only (`.6×`, `1×`, …) above the shutter bar,
+  hidden when the active camera has a single lens. Tap to switch lens.
+- **Mode switch** — **Photo / Video** pill above the shutter (hidden on lenses with no
+  recordable stream). Video mode fixes a 16:9 framing so the preview, the sensor crop and
+  the encoder agree; the photo aspect is restored when you switch back.
+- **Video quality pill** — `720p · 30 fps`, `1080p · 60 fps`, … opens the video settings
+  sheet. Only resolutions and frame rates the active lens advertises are offered.
+- **Bottom bar**
+  - **Thumbnail** — last photo or clip saved by RawCam (clips carry a small play badge);
+    opens it with the system viewer.
+  - **Shutter** — Material You accent circle, haptic feedback, compresses on press, shows a
+    progress ring while the photo is being captured and saved. In video mode it turns red
+    and becomes a record button; while recording the centre becomes a white stop square.
+  - **Flip** — switches back/front; the icon rotates with the device.
+- **Recording pill** — red dot plus elapsed time under the readout while a clip is rolling.
+- **Hardware shutter** — the volume keys take a photo.
+- **Snackbars** — feedback (flash, timer, saved, lens removed, silent recording) appears as
+  a Material snackbar above the shutter bar.
 
-The manual sheet is part of the activity, so it stays inside the portrait-locked, edge-to-edge
-layout and never requires AndroidX. While it is open the bottom bar slides away, the scrim
-dims the preview and the sheet slides up. It only shows the panels the lens supports:
+### Video settings sheet
 
-- **EXP** — switch A/M, then use the ISO and shutter sliders. Manual mode sets both together,
-  exactly as Camera2 requires. Long exposures leave the preview approximate (and say so),
-  while the saved photo uses the exact values.
-- **FOCUS** — Auto, continuous, or manual focus distance. Fixed-focus and AF-less lenses show
-  `Fixed focus` / `No AF` instead of a misleading distance.
-- **WB** — Auto, preset illuminants, or Kelvin. Kelvin mode turns AWB off and applies the
-  device's colour transform.
-- **Close**, the scrim, **Photo**, or **Back** dismisses the sheet.
+A second modal bottom sheet, opened from the quality pill:
+
+- **Resolution** — only qualities the lens can stream to an encoder, mapped to the camera's
+  own buffers (the canonical size such as 3840×2160 is preferred over a sensor crop).
+- **Frame rate** — only rates present in `CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES`; the exact
+  range is pinned on the record request.
+- **Summary** — buffer size, frame rate and the computed H.264 bitrate, plus a note that NR,
+  sharpening, distortion and stabilisation stay off.
+- **Sound** — requested lazily. Declining records silent clips and says so; if the encoder
+  cannot prepare with audio, the app retries the same settings without sound.
+- Preview in video mode clamps manual exposure to one frame so the viewfinder shows exactly
+  what the encoder receives (long shutters are shortened and ISO raised to keep brightness).
+
+### Manual sheet
+
+A Material 3 modal bottom sheet, limited to what the active lens advertises:
+
+- **Exposure** — Auto or Manual, with ISO and shutter sliders in third-stop steps. Manual
+  mode sets both together, exactly as Camera2 requires. Long exposures note that the live
+  preview is approximate while the saved photo uses the exact values.
+- **Focus** — Auto or Manual distance, with metric labels on calibrated lenses.
+- **White balance** — Auto, a preset illuminant chip, or a Kelvin slider. Kelvin turns AWB
+  off and applies the device's colour transform.
 
 ## Design notes
 
-- **Palette** — near-black surfaces (`#17181B`, `#1C1C1E`, `#2A2A2D`), yellow accent
-  (`#FFD54A`), translucent glass (`#8C1C1C1E`), white and dim-white text. Red (`#FF4A3D`) is
-  reserved for future recording state.
-- **Shape** — a centred 18dp-rounded preview frame, a 24dp glass lens capsule, 17dp mode pills,
-  a 14dp thumbnail, an 18dp chip set and a 78dp shutter with a 4dp white ring.
-- **Motion** — the top row slides down, the preview fades and scales in, the bottom bar rises on
-  launch; the shutter compresses and rebounds; the countdown pulses; the sheet slides up while
-  the bottom bar slides away; the toast fades in and out.
-- **Dialogs** — alert dialogs and the aspect popup use the same neutral surfaces, 28dp/20dp
-  corners and yellow actions.
-- **No images** — all icons are small vector drawables tinted at runtime; no icon fonts or
-  bitmap assets are bundled.
+- **Material You** — `dynamicDarkColorScheme` supplies the entire palette (accent, surfaces,
+  containers) from the device wallpaper. The camera UI stays dark by design.
+- **Shape** — circular glass buttons, 16 dp rounded thumbnail, circular shutter with a 4 dp
+  white ring, pill-shaped lens chips and readout.
+- **Motion** — spring-driven shutter press, animated countdown, fading focus ring, animated
+  flip icon, Material sheet and snackbar transitions. All animations are declarative and
+  can be interrupted mid-flight.
+- **Legibility** — soft top and bottom gradient scrims keep controls readable on bright
+  scenes, and snackbars use a dark tonal (rather than the default light inverse) surface.
+- **No images** — icons are small vector drawables tinted at runtime.
+
+## Architecture
+
+The project follows the recommended Android layering behind a single activity:
+
+```
+app/src/main/java/com/rawcam/
+  MainActivity.kt                 ComponentActivity: edge-to-edge, permission, OrientationHelper
+  presentation/
+    CameraUiState.kt              Immutable UI snapshot, timer mode, one-shot signals
+    CameraViewModel.kt            Owns the camera session, exposes StateFlow + intents
+  ui/
+    RawCamApp.kt                  Permission gate, snackbar routing, error dialog, audio prompt
+    CameraScreen.kt               Full-bleed preview, gestures, grid, countdown, focus ring
+    Controls.kt                   Mode switch, top controls, shutter bar, pills, thumbnail
+    ManualControlsSheet.kt        Material 3 manual exposure/focus/WB sheet
+    VideoSettingsSheet.kt         Material 3 resolution / frame-rate sheet
+    ThumbnailLoader.kt            Small upright EXIF-aware thumbnail decode (+ video thumbs)
+    ContextExt.kt                 Activity lookup, settings and media-view intents
+    theme/Theme.kt                Material You dynamic colour
+  data/
+    UiPreferences.kt              Grid, timer, mode, video quality and last-media persistence
+  camera (data layer, framework):
+    CameraController.kt           Camera2 lifecycle, sessions, still + record, lens fallback
+    CameraCaps.kt                 Camera/lens discovery and profiles (incl. video streams)
+    RequestApplier.kt             Pure request spec -> Camera2 keys
+    ProcessingVerifier.kt         Live readout and processing verification
+    PhotoSaver.kt                 Untouched JPEG bytes -> MediaStore
+    VideoRecorder.kt              MediaRecorder -> pending MediaStore MP4
+    OrientationHelper.kt          Device rotation -> EXIF orientation / icon rotation
+  core/                           Pure Kotlin: no Android types
+    Model.kt, AspectMath.kt, ExposureMath.kt, FocusMath.kt,
+    ManualFocus.kt, ManualWhiteBalance.kt, OrientationMath.kt, RequestBuilder.kt,
+    VideoMath.kt                  Qualities, fps ranges, bitrate, duration, exposure clamp
+app/src/test/java/com/rawcam/core/
+  120 JVM unit tests covering the pure logic
+```
+
+The flow is strictly one-directional: UI events call `CameraViewModel` intents, the
+view-model calls the `CameraController`, controller callbacks become `CameraUiState`, and
+Compose renders that state. The camera machinery and the pure math stay untouched by the UI
+rewrite, so the existing test suite still covers the pipeline.
 
 ## What "no processing" means
 
-Every still request explicitly asks for:
+Every still and record request explicitly asks for:
 
 - noise reduction off
 - edge enhancement off
 - hot-pixel correction off
 - chromatic aberration correction off
 - distortion correction off
-- video stabilisation off
+- video stabilisation (EIS) off
 - sRGB tone map (or `FAST` where the device lacks the preset curve)
 - linear colour correction / transform matrix as appropriate
 
 The live readout is built from `TotalCaptureResult`, and each capture logs whether the device
-honoured the request. Long-press the readout for the same information in a dialog.
+honoured the request. Video uses the same request builder with `TEMPLATE_RECORD`: the first
+frame of a recording is verified exactly like a still, and the log names the mode
+(`Video recording:`).
+
+Video is written by the platform encoder from the raw camera surface, so the app itself adds
+no filters, scaling, frame interpolation or stabilisation. The unavoidable encode step
+(demosaic → tone map → H.264) is the same one every camera app performs; the optional ISP
+stages above are what RawCam disables.
 
 ## Verify on a device
 
 ```powershell
-adb logcat -s RawCam/Caps RawCam/Verify RawCam/Controller RawCam/Save
+adb logcat -s RawCam/Caps RawCam/Verify RawCam/Controller RawCam/Video RawCam/Save
 ```
 
-- `RawCam/Caps` lists discovered cameras, physical lenses, supported streams, ISO/shutter
-  ranges, focus support, AWB presets and every "off" capability.
+- `RawCam/Caps` lists discovered cameras, physical lenses, stream sizes (photo and video),
+  AE frame-rate ranges, ISO/shutter ranges, focus support, AWB presets and every "off"
+  capability.
 - `RawCam/Verify` prints the accepted request values from `TotalCaptureResult`
   (`NR`, `EDGE`, `HOT`, `CA`, `DIST`, `STAB`, `TONEMAP`, `CCM`, `AE`, `ISO`, `SHUTTER`,
   `FOCUS`, `AF`, `AWB`, `PHYS`). `PHYS` names the physical lens that actually produced the
   frame.
 - `RawCam/Controller` logs the chosen lens strategy, session plan, capture values and JPEG
   arrival.
+- `RawCam/Video` logs the prepared file, buffer, frame rate, bitrate, audio state,
+  orientation hint, recording start and the published MediaStore URI.
 
 ## Lens selection
 
@@ -156,79 +229,73 @@ at runtime, the chip is removed and the app falls back to logical zoom or the ma
 
 | Device | Android | Result |
 | --- | --- | --- |
-| Google Pixel 5 (serial `09171FDD40050B`) | 14 (API 34) | Passed the checks below |
+| Google Pixel 5 (serial `09171FDD40050B`) | 14 (API 34) | Photo + video pipeline passed (Compose build) |
+| Android 15 emulator (API 36, virtual scene camera) | 15 | Photo + video UI and pipeline passed |
 
-Pixel 5 results:
+Pixel 5 results with the Compose build:
 
 - Back: 0.6× ultrawide physical `3`, 1× main physical `2`; both physical streams verified.
 - Front: direct camera `1`, no flash and no manual focus; fixed-focus label shown.
-- Auto capture: 10.4 MB JPEG with NR/EDGE/HOT/CA/DIST/STAB all off, AE on, AWB auto.
-- Manual exposure: `AE=OFF`, ISO 1109 requested / 1108 reported, shutter within device rounding.
-- 10.2 s manual exposure completed and verified at ISO 55 / 10.17 s.
-- Ultrawide capture verified `PHYS=3`; main verified `PHYS=2`.
-- 16:9 produced a `4032×2268` JPEG; Full produced `4000×2000` on the ultrawide.
-- WB preset Incandescent verified `AWB=INCANDESCENT`; Kelvin verified `AWB=OFF`, `CCM=TRANSFORM_MATRIX`.
-- Manual focus verified `AF=OFF` with the requested dioptre value.
-- Flip, pause/resume, lens-chip visibility and front EXIF orientation verified.
-- Preview orientation checked against the saved upright JPEG by edge correlation.
-- `camera-ui.html` UI verified on-device: five-control top row (`Off`/`3s`/`On`/`3×3`/`3:4`),
-  rounded 3:4 frame at 1080×1440, glass lens capsule, `Manual`/`Photo`/`Info` carousel, shutter
-  bar, in-app toast above the lens capsule, 3-second countdown, aspect popup (`3:4`, `2:3`,
-  `9:16`, `Full`) and slide-up manual sheet with auto/manual chips.
-- `Full` aspect selected the native 2:1 stream on the Pixel 5 main lens (shown as a 1:2 upright
-  frame); the 3:4 capture was 4032×3024.
-- Manual sheet contents follow the active lens: back shows EXP + FOCUS + WB; ultrawide and
-  front show EXP + WB (no focus). Back and the scrim both dismiss the sheet.
-- Grid preference survived an app restart; the thumbnail updated after capture and opened the
-  system viewer chooser; the Info report, aspect popup and permission screen rendered correctly.
-- Front preview is mirrored on screen while the saved JPEG stays unmirrored.
-- 4:3 capture produced 4032×3024; Full produced 4000×2000.
+- Still: 4032×3024 JPEG, 12.0 MB, written unchanged with NR/EDGE/HOT/CA/DIST/STAB off.
+- Video: 1080p60 and 4K60 (`3840×2160`) recorded with audio through the physical lens
+  (`PHYS=2`), first-frame verification `NR=OFF EDGE=OFF HOT=OFF CA=OFF DIST=OFF STAB=OFF
+  TONEMAP=FAST CCM=FAST`; MediaStore entries published with the expected dimensions,
+  duration and size.
+- Video settings sheet offers 4K / 1080p / 720p and 24 / 30 / 60 fps, each one advertised by
+  the lens; the encoder buffer and AE range are pinned to the selection.
+- Manual exposure in video is clamped to one frame (e.g. 1/60 s at 60 fps) with ISO raised
+  to preserve brightness.
+- Photo mode restores the 4:3 framing after leaving video mode; the mode is persisted.
 
-Devices from other manufacturers are still untested. Capability differences are expected;
-the UI should hide anything the device cannot do.
+Emulator results (API 36, virtual scene, `camera:10` DIRECT stream map offers only 1280×720):
+
+- Photo/Video switch, 16:9 video framing, `720p · 30 fps` pill and quality sheet listing only
+  supported options.
+- Record → 22.8 s clip at 1280×720, 2.25 MB in `DCIM/Camera`, `is_pending=0`, verified
+  `NR/EDGE/HOT/CA/DIST/STAB=OFF`.
+- Lazy audio prompt: granting it starts the queued recording immediately (no "camera not
+  ready" error); denying it records silently and shows "Recording without sound".
+- A record tap followed by a quick stop tap still produces a valid short clip (≥ 500 ms).
+- Home/pause mid-recording publishes the clip; resuming reopens the video session.
+
+Still good checks on other hardware: EXIF orientation against the saved JPEG, lens-switch
+continuity, long exposures, and 24 fps/720p combinations on devices that advertise them.
+
+Suggested device checklist for the Compose build:
+
+1. Permission first-run, deny, grant and "open settings" paths.
+2. Full-bleed preview orientation, front mirror, pinch zoom and double-tap zoom.
+3. Tap-to-focus ring lands under the finger, including near the edges.
+4. Flash/timer/grid toggles, countdown cancel, volume-key shutter.
+5. Manual sheet: exposure stops, focus label, WB preset/Kelvin; long-exposure note.
+6. Lens pills appear only when physical lenses verify; switching keeps the preview upright.
+7. Saved JPEG opens from the thumbnail; EXIF orientation upright.
+8. Video: mode switch fixes 16:9, quality sheet lists only advertised sizes/rates, record and
+   stop produce a playable MP4, audio grant/deny paths, pause mid-clip saves.
+9. Snackbars and the camera error dialog (simulate by opening the camera in another app).
 
 ## Known limitations
 
-- No RAW/DNG, no video, no gallery, no HDR, no computational photography.
+- No RAW/DNG, no gallery, no HDR, no computational photography.
 - No portrait/background blur, no night mode, no panorama.
+- Video is simple by design: one clip per tap, no pause/resume, no audio toggle, fixed 16:9,
+  H.264/MPEG-4 only, and no in-app trimming. Audio is mic-only.
+- Video quality options are limited to the device's advertised encoder buffers and AE frame
+  rates; a lens with no wide encoder stream shows no Photo/Video switch.
+- A capture failure during recording discards that clip rather than publishing a broken file.
+- The feature set is intentionally lean: no aspect-ratio selector (photos are 4:3), no
+  in-app capability report. Verification stays in logcat.
+- The viewfinder is a full-bleed centre crop, so the saved 4:3 photo contains slightly more
+  at the left and right edges than the preview shows. This matches how mainstream camera
+  apps frame 4:3 stills on tall screens.
 - Manual controls and extra lenses appear only when the camera advertises them.
 - Physical-lens streams may not support zoom on some devices; the app then keeps the lens
   chip for stills and disables or falls back on zoom.
-- The preview is a centred frame at the selected ratio rather than a full-bleed crop; `Full`
-  chooses the native stream closest to the screen ratio, so a little of the stage stays black
-  on most devices. The JPEG always keeps the selected ratio.
-- The gallery thumbnail opens the system viewer chooser rather than an in-app gallery;
-  RawCam has no gallery of its own.
+- The gallery thumbnail opens the system viewer rather than an in-app gallery.
 - Long exposures slow the preview and make it approximate by design.
-- The orientation listener is quantised to 0/90/180/270; a device lying flat can report an
-  ambiguous rotation, which affects the EXIF orientation of that shot.
+- The activity is portrait-locked; the orientation listener is quantised to 0/90/180/270, so
+  a device lying flat can report an ambiguous rotation for that shot.
 - Release builds are unsigned and have no Play Store packaging.
-
-## Project layout
-
-```
-app/src/main/java/com/rawcam/
-  MainActivity.kt          UI, gestures, permissions, preview layout, manual sheet
-  AspectFrameLayout.kt     Centred ratio frame for the rounded preview
-  GridOverlay.kt           Rule-of-thirds overlay
-  CameraController.kt      Camera2 lifecycle, sessions, capture, lens fallback
-  CameraCaps.kt            Camera/lens discovery and profiles
-  RequestApplier.kt        Pure request spec -> Camera2 keys
-  ProcessingVerifier.kt    Live readout and processing verification
-  PhotoSaver.kt            Untouched JPEG bytes -> MediaStore
-  OrientationHelper.kt     Device rotation -> EXIF orientation / icon rotation
-  core/                    Pure Kotlin: no Android types
-    Model.kt               State, lens and aspect models
-    AspectMath.kt          Aspect/output/preview sizing and crop
-    ExposureMath.kt        ISO/shutter steps, formatting, preview clamping
-    ManualFocus.kt         Focus distance/dioptre mapping
-    ManualWhiteBalance.kt  Kelvin and gain math
-    FocusMath.kt           Tap-to-sensor coordinate mapping
-    OrientationMath.kt     EXIF and icon rotation
-    RequestBuilder.kt      Pure capture request specification
-app/src/test/java/com/rawcam/core/
-  102 JVM unit tests covering the pure logic
-```
 
 ## Tests
 
@@ -237,4 +304,6 @@ app/src/test/java/com/rawcam/core/
 ```
 
 The suite covers aspect/output sizing, exposure and shutter formatting, focus mapping,
-orientation (front and back), Kelvin/gain math, state clamping and request building.
+orientation (front and back), Kelvin/gain math, state clamping, request building, and video
+helpers (quality/size matching, advertised frame rates, AE range selection, bitrate,
+duration and exposure clamping).

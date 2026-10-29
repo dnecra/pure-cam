@@ -37,8 +37,11 @@ import com.rawcam.core.LensMode
 import com.rawcam.core.LensProfile
 import com.rawcam.core.ManualWhiteBalance
 import com.rawcam.core.OrientationMath
+import com.rawcam.core.RangeI
 import com.rawcam.core.RequestBuilder
 import com.rawcam.core.RequestSpec
+import com.rawcam.core.VideoConfig
+import com.rawcam.core.VideoMath
 import com.rawcam.core.WhiteBalanceMode
 import java.util.concurrent.Executor
 
@@ -58,6 +61,8 @@ class CameraController(
         fun onReadout(readout: LiveReadout)
         fun onCaptureStarted(exposureNs: Long?)
         fun onCaptureFinished(uri: Uri?, error: String?)
+        fun onRecordingStarted(config: VideoConfig, withAudio: Boolean)
+        fun onRecordingFinished(uri: Uri?, error: String?)
         fun onCameraError(message: String)
         fun onLensRemoved(removed: LensProfile, replacement: LensProfile?)
         fun onVerification(issues: List<String>, summary: String)
@@ -126,6 +131,24 @@ class CameraController(
     private var captureWatchdog: Runnable? = null
     private var settleTimeout: Runnable? = null
 
+    @Volatile
+    private var videoMode = false
+    private var photoAspect: Aspect = Aspect.R4_3
+
+    @Volatile
+    private var recording = false
+    private var recordingStarting = false
+    private var stopAfterStart = false
+    private var recorder: VideoRecorder? = null
+    private var recorderSurface: Surface? = null
+    private var recordingConfig: VideoConfig? = null
+    private var recordingStartedMs = 0L
+    private var recordSpec: RequestSpec? = null
+    private var recordVerified = false
+    private var pendingStop: Runnable? = null
+    /** A record request that arrived while the camera was still reopening. */
+    private var pendingRecording: Pair<VideoConfig, Boolean>? = null
+
     private var lastTransform: FloatArray? = null
     private var lastAutoGains: FloatArray? = null
     private var lastReadoutPostMs = 0L
@@ -152,7 +175,14 @@ class CameraController(
                 return@post
             }
             state = CameraState.defaults(lens)
-                .copy(aspect = chooseAspect(lens, Aspect.R4_3))
+                .copy(
+                    aspect = if (videoMode) {
+                        photoAspect = chooseAspect(lens, Aspect.R4_3)
+                        chooseAspect(lens, Aspect.R16_9)
+                    } else {
+                        chooseAspect(lens, Aspect.R4_3)
+                    }
+                )
                 .clamped()
             notifyCatalog()
             notifyState()
@@ -209,6 +239,8 @@ class CameraController(
     fun plan(): AspectPlan? = currentPlan
     fun strategy(): LensMode = effectiveStrategy
     fun isCapturing(): Boolean = capturing
+    fun isRecording(): Boolean = recording
+    fun isVideoMode(): Boolean = videoMode
     fun unsupportedLenses(): Set<String> = unsupportedLensIds.toSet()
     fun lastIssues(): List<String> = lastIssues
 
@@ -231,9 +263,11 @@ class CameraController(
 
     fun setLens(lens: LensProfile) {
         cameraHandler.post {
+            if (recording) return@post
             val s = state ?: return@post
             if (s.lens.id == lens.id) return@post
             if (unsupportedLensIds.contains(lens.id)) return@post
+            pendingRecording = null
             val oldCamera = s.lens.cameraId
             state = s.withLens(lens)
                 .copy(aspect = chooseAspect(lens, s.aspect))
@@ -254,6 +288,7 @@ class CameraController(
 
     fun setAspect(aspect: Aspect) {
         cameraHandler.post {
+            if (recording || videoMode) return@post
             val s = state ?: return@post
             if (s.aspect == aspect) return@post
             if (!CameraCaps.aspectsFor(s.lens).contains(aspect)) return@post
@@ -267,6 +302,7 @@ class CameraController(
 
     fun flipFacing() {
         cameraHandler.post {
+            if (recording) return@post
             val current = state?.lens?.facing ?: facing
             val next = when {
                 current == Facing.BACK && catalog.lenses(Facing.FRONT).isNotEmpty() -> Facing.FRONT
@@ -274,6 +310,7 @@ class CameraController(
                 else -> current
             }
             if (next == current) return@post
+            pendingRecording = null
             val lens = catalog.main(next) ?: return@post
             val base = state ?: CameraState.defaults(lens)
             facing = next
@@ -399,6 +436,283 @@ class CameraController(
         cameraHandler.post { captureInternal() }
     }
 
+    // ---------------------------------------------------------------- video
+
+    /**
+     * Switches between stills and video. Video forces a 16:9 framing so the preview, the sensor
+     * crop and the encoder buffer all show the same thing; the photo aspect is restored on exit.
+     */
+    fun setVideoMode(enabled: Boolean) {
+        cameraHandler.post {
+            if (videoMode == enabled || recording || recorder != null) return@post
+            val s = state
+            if (s == null) {
+                // Called before the first camera open (restored preference); start() picks it up.
+                videoMode = enabled
+                return@post
+            }
+            if (enabled && !s.lens.supportsVideo) {
+                notifyError("This lens cannot record video")
+                return@post
+            }
+            videoMode = enabled
+            state = if (enabled) {
+                photoAspect = s.aspect
+                s.copy(aspect = chooseAspect(s.lens, Aspect.R16_9)).clamped()
+            } else {
+                s.copy(aspect = chooseAspect(s.lens, photoAspect)).clamped()
+            }
+            pendingRecording = null
+            aeRegion = null
+            afRegion = null
+            closeSessionAndReader()
+            notifyState()
+            if (device != null) createSession()
+        }
+    }
+
+    fun startRecording(config: VideoConfig, withAudio: Boolean) {
+        cameraHandler.post {
+            if (recording || recordingStarting || recorder != null || !videoMode) return@post
+            val s = state ?: return@post
+            val actual = resolveVideoConfig(s.lens, config) ?: run {
+                notifyError("This lens cannot record video")
+                return@post
+            }
+            if (device == null || session == null || surfaceTexture == null) {
+                // The audio-permission dialog pauses the activity and the camera reopens
+                // asynchronously; honour the tap once the session is back.
+                pendingRecording = actual to withAudio
+                return@post
+            }
+            startRecordingSession(actual, withAudio)
+        }
+    }
+
+    fun stopRecording() {
+        cameraHandler.post {
+            if (pendingRecording != null && !recording && !recordingStarting) {
+                // The tap to start has not reached a session yet (audio dialog): cancel it.
+                pendingRecording = null
+                mainHandler.post { listener.onRecordingFinished(null, null) }
+                return@post
+            }
+            if (recordingStarting) {
+                // The encoder has not produced a frame yet; remember the tap and stop as soon
+                // as it starts, so a double tap never leaves the camera recording.
+                stopAfterStart = true
+                return@post
+            }
+            if (!recording || pendingStop != null) return@post
+            scheduleStop()
+        }
+    }
+
+    private fun scheduleStop() {
+        val rec = recorder ?: return
+        val elapsed = rec.elapsedMs()
+        if (elapsed >= VideoMath.MIN_RECORDING_MS) {
+            stopRecordingNow()
+        } else {
+            // A very quick tap would otherwise produce an empty, unplayable MP4.
+            val runnable = Runnable {
+                pendingStop = null
+                stopRecordingNow()
+            }
+            pendingStop = runnable
+            cameraHandler.postDelayed(runnable, VideoMath.MIN_RECORDING_MS - elapsed)
+        }
+    }
+
+    private fun stopRecordingNow() {
+        if (!recording) return
+        finishRecording(save = true, reconfigure = true)
+    }
+
+    private fun startRecordingSession(config: VideoConfig, withAudio: Boolean) {
+        val st = surfaceTexture ?: return
+        val d = device ?: return
+        val lens = state?.lens ?: return
+
+        val plan = AspectMath.planForOutput(lens, config.size)
+        currentPlan = plan
+
+        // Recording needs exactly two outputs: preview and encoder. The JPEG reader goes away so
+        // the session stays within every device's guaranteed stream combination.
+        closeSessionAndReader()
+        st.setDefaultBufferSize(plan.previewSize.width, plan.previewSize.height)
+        val preview = Surface(st)
+        previewSurface = preview
+
+        val rec = VideoRecorder(context)
+        var usedAudio = withAudio
+        val surface = try {
+            rec.open(config, videoOrientationHint(), withAudio)
+        } catch (first: Throwable) {
+            if (!withAudio) {
+                Log.e(tag, "could not prepare video recorder", first)
+                rec.release(deleteRow = true)
+                notifyError("Could not start the video recorder")
+                createSession()
+                return
+            }
+            Log.w(tag, "audio recording unavailable; retrying without sound", first)
+            usedAudio = false
+            try {
+                rec.open(config, videoOrientationHint(), false)
+            } catch (second: Throwable) {
+                Log.e(tag, "could not prepare silent video recorder", second)
+                rec.release(deleteRow = true)
+                notifyError("Could not start the video recorder")
+                createSession()
+                return
+            }
+        }
+        recorder = rec
+        recorderSurface = surface
+        recordingConfig = config
+        recordSpec = null
+        recordVerified = false
+        recordingStarting = true
+        stopAfterStart = false
+
+        val token = ++sessionToken
+        val previewCfg = OutputConfiguration(preview)
+        val recordCfg = OutputConfiguration(surface)
+        if (effectiveStrategy == LensMode.PHYSICAL && lens.physicalId != null) {
+            previewCfg.setPhysicalCameraId(lens.physicalId)
+            recordCfg.setPhysicalCameraId(lens.physicalId)
+        }
+
+        try {
+            val sessionConfig = SessionConfiguration(
+                SessionConfiguration.SESSION_REGULAR,
+                listOf(previewCfg, recordCfg),
+                Executor { runnable -> cameraHandler.post(runnable) },
+                object : CameraCaptureSession.StateCallback() {
+                    override fun onConfigured(created: CameraCaptureSession) {
+                        if (token != sessionToken || device == null) {
+                            created.close()
+                            rec.cancel()
+                            if (recorder === rec) {
+                                recorder = null
+                                recorderSurface = null
+                                recordingConfig = null
+                                recordingStarting = false
+                            }
+                            return
+                        }
+                        session = created
+                        val builder = buildRecordRequest()
+                        if (builder == null) {
+                            notifyError("Could not configure the video request")
+                            finishRecording(save = false, reconfigure = true)
+                            return
+                        }
+                        try {
+                            created.setRepeatingRequest(builder.build(), recordCallback, cameraHandler)
+                            rec.start()
+                            recording = true
+                            recordingStarting = false
+                            recordingStartedMs = SystemClock.elapsedRealtime()
+                            Log.i(
+                                tag,
+                                "recording ${config.size} ${config.fps}fps audio=$usedAudio " +
+                                    "strategy=$effectiveStrategy"
+                            )
+                            mainHandler.post { listener.onRecordingStarted(config, usedAudio) }
+                            if (stopAfterStart) {
+                                stopAfterStart = false
+                                scheduleStop()
+                            }
+                        } catch (t: Throwable) {
+                            Log.e(tag, "could not start recording", t)
+                            finishRecording(save = false, reconfigure = true)
+                            notifyError("Could not start recording: ${t.message}")
+                        }
+                    }
+
+                    override fun onConfigureFailed(created: CameraCaptureSession) {
+                        if (token != sessionToken) return
+                        Log.e(tag, "recording session configuration failed")
+                        rec.cancel()
+                        recorder = null
+                        recorderSurface = null
+                        recordingConfig = null
+                        recordingStarting = false
+                        stopAfterStart = false
+                        notifyError("Could not configure the video session")
+                        createSession()
+                    }
+                }
+            )
+            d.createCaptureSession(sessionConfig)
+        } catch (t: Throwable) {
+            Log.e(tag, "createCaptureSession (video) failed", t)
+            rec.cancel()
+            recorder = null
+            recorderSurface = null
+            recordingConfig = null
+            recordingStarting = false
+            stopAfterStart = false
+            notifyError("Could not configure the video session")
+            createSession()
+        }
+    }
+
+    private fun resolveVideoConfig(lens: LensProfile, requested: VideoConfig? = null): VideoConfig? {
+        val qualities = VideoMath.availableQualities(lens.videoSizes)
+        val quality = requested?.quality?.takeIf { qualities.contains(it) }
+            ?: VideoMath.defaultQuality(qualities)
+            ?: return null
+        val size = VideoMath.sizeFor(quality, lens.videoSizes) ?: return null
+        val fpsOptions = VideoMath.supportedFps(lens.videoFpsRanges)
+        val fps = VideoMath.fpsFor(requested?.fps ?: VideoMath.DEFAULT_FPS, fpsOptions)
+        return VideoConfig(quality, size, fps)
+    }
+
+    /**
+     * Stops the encoder and publishes the file. With [reconfigure] the still-capable session comes
+     * back so the next shutter press is instant; teardown paths pass false.
+     */
+    private fun finishRecording(save: Boolean, reconfigure: Boolean, errorOverride: String? = null) {
+        val rec = recorder ?: return
+        pendingStop?.let { cameraHandler.removeCallbacks(it) }
+        pendingStop = null
+        val wasRecording = recording
+        recording = false
+        recordingStarting = false
+        stopAfterStart = false
+        recorder = null
+        recorderSurface = null
+        recordingConfig = null
+        recordSpec = null
+        runCatching { session?.stopRepeating() }
+        runCatching { session?.abortCaptures() }
+
+        var uri: Uri? = null
+        var error: String? = errorOverride
+        if (save && wasRecording && errorOverride == null) {
+            try {
+                uri = rec.stop()
+                Log.i(tag, "recording saved: $uri")
+            } catch (t: Throwable) {
+                Log.e(tag, "could not finish recording", t)
+                error = "Could not save the video"
+            }
+        } else {
+            rec.cancel()
+        }
+
+        mainHandler.post { listener.onRecordingFinished(uri, error) }
+        if (reconfigure && device != null) createSession() else notifyState()
+    }
+
+    private fun videoOrientationHint(): Int {
+        val lens = state?.lens ?: return 0
+        return OrientationMath.jpegOrientation(lens.sensorOrientation, deviceRotation, false)
+    }
+
     // ---------------------------------------------------------------- camera open / session
 
     private fun openCameraIfReady() {
@@ -459,7 +773,15 @@ class CameraController(
         if (aspect != s0.aspect) state = s0.copy(aspect = aspect)
         val s = state ?: return
 
-        val plan = AspectMath.plan(s.lens, aspect, screenAspect())
+        // Video keeps the preview on the encoder's aspect even before recording starts, so the
+        // framing does not jump when the user presses record.
+        val photoPlan = AspectMath.plan(s.lens, aspect, screenAspect())
+        val plan = if (videoMode) {
+            resolveVideoConfig(s.lens)?.let { AspectMath.planForOutput(s.lens, it.size) }
+                ?: photoPlan
+        } else {
+            photoPlan
+        }
         currentPlan = plan
         st.setDefaultBufferSize(plan.previewSize.width, plan.previewSize.height)
 
@@ -467,7 +789,7 @@ class CameraController(
         val token = ++sessionToken
 
         val jpegReader = try {
-            ImageReader.newInstance(plan.jpegSize.width, plan.jpegSize.height, ImageFormat.JPEG, 2)
+            ImageReader.newInstance(photoPlan.jpegSize.width, photoPlan.jpegSize.height, ImageFormat.JPEG, 2)
         } catch (t: Throwable) {
             notifyError("Could not create JPEG output: ${t.message}")
             return
@@ -519,6 +841,10 @@ class CameraController(
                         Log.i(tag, "session ready: lens=${lens.label} strategy=$effectiveStrategy plan=$plan")
                         notifyState()
                         applyPreview()
+                        pendingRecording?.let { (config, withAudio) ->
+                            pendingRecording = null
+                            startRecordingSession(config, withAudio)
+                        }
                     }
 
                     override fun onConfigureFailed(session: CameraCaptureSession) {
@@ -620,6 +946,10 @@ class CameraController(
 
     private fun closeSessionAndReader() {
         sessionToken++
+        pendingStop?.let { cameraHandler.removeCallbacks(it) }
+        pendingStop = null
+        // Pausing or reconfiguring mid-recording must still publish what was written so far.
+        if (recording || recordingStarting) finishRecording(save = true, reconfigure = false)
         if (capturing) {
             removeCaptureRunnables()
             capturing = false
@@ -640,6 +970,9 @@ class CameraController(
 
     private fun closeCamera() {
         generation++
+        pendingRecording = null
+        recordingStarting = false
+        stopAfterStart = false
         closeSessionAndReader()
         runCatching { device?.close() }
         device = null
@@ -670,7 +1003,9 @@ class CameraController(
             strategy = effectiveStrategy,
             previewClamp = true,
             focusAssist = focusAssist,
-            fallbackTransform = lastTransform
+            fallbackTransform = lastTransform,
+            videoFps = if (videoMode) resolveVideoConfig(s.lens)?.fps ?: VideoMath.DEFAULT_FPS else null,
+            videoMode = videoMode
         )
         val builder = d.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
         builder.addTarget(surface)
@@ -678,11 +1013,51 @@ class CameraController(
         return builder
     }
 
+    /**
+     * Repeating request for an active recording: preview plus encoder, pinned frame rate, torch
+     * instead of flash. Rebuilt whenever exposure/focus/WB change, so manual controls stay live.
+     */
+    private fun buildRecordRequest(): CaptureRequest.Builder? {
+        val s = state ?: return null
+        val plan = currentPlan ?: return null
+        val d = device ?: return null
+        val preview = previewSurface ?: return null
+        val recSurface = recorderSurface ?: return null
+        val config = recordingConfig ?: return null
+        val range = VideoMath.aeRangeFor(config.fps, s.lens.videoFpsRanges)
+        return try {
+            val spec = RequestBuilder.build(
+                state = s,
+                profile = s.lens,
+                intent = CaptureIntent.RECORD,
+                outputAspect = plan.outputAspect,
+                strategy = effectiveStrategy,
+                previewClamp = true,
+                focusAssist = false,
+                fallbackTransform = lastTransform,
+                videoFps = config.fps,
+                videoFpsRange = range?.let { RangeI(it.first, it.last) },
+                videoMode = true
+            )
+            val builder = d.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
+            builder.addTarget(preview)
+            builder.addTarget(recSurface)
+            RequestApplier.apply(builder, spec, jpegOrientation(), aeRegion, afRegion)
+            builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_IDLE)
+            recordSpec = spec
+            builder
+        } catch (t: Throwable) {
+            Log.e(tag, "could not build record request", t)
+            null
+        }
+    }
+
     private fun applyPreview() {
         if (capturing) return
-        val builder = buildPreviewRequest() ?: return
+        val builder = (if (recording) buildRecordRequest() else buildPreviewRequest()) ?: return
+        val callback = if (recording) recordCallback else previewCallback
         try {
-            session?.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
+            session?.setRepeatingRequest(builder.build(), callback, cameraHandler)
         } catch (t: Throwable) {
             Log.e(tag, "setRepeatingRequest failed", t)
             notifyError("Preview request failed: ${t.message}")
@@ -701,7 +1076,7 @@ class CameraController(
     // ---------------------------------------------------------------- capture
 
     private fun captureInternal() {
-        if (capturing) return
+        if (capturing || videoMode) return
         val s = state ?: return
         currentPlan ?: return
         if (session == null || reader == null || previewSurface == null || device == null) {
@@ -880,8 +1255,50 @@ class CameraController(
         }
     }
 
-    private val stillCallback = object : CameraCaptureSession.CaptureCallback() {
+    /**
+     * Repeating-request callback while recording. The first frame after record starts is
+     * verified exactly like a still capture, so the capability report proves the camera really
+     * honored the "no processing" settings in video mode too.
+     */
+    private val recordCallback = object : CameraCaptureSession.CaptureCallback() {
         override fun onCaptureCompleted(
+            session: CameraCaptureSession,
+            request: CaptureRequest,
+            result: TotalCaptureResult
+        ) {
+            handleResult(result)
+            if (!recording || recordVerified) return
+            recordVerified = true
+            val spec = recordSpec ?: return
+            val lens = state?.lens ?: return
+            val issues = ProcessingVerifier.verify(result, spec, lens)
+            lastIssues = issues
+            lastVerification = buildString {
+                appendLine("Video recording:")
+                appendLine(ProcessingVerifier.summary(result))
+                if (issues.isEmpty()) {
+                    appendLine("All requested settings were honored.")
+                } else {
+                    issues.forEach { appendLine("- $it") }
+                }
+            }
+            mainHandler.post { listener.onVerification(issues, lastVerification) }
+        }
+
+        override fun onCaptureFailed(
+            session: CameraCaptureSession,
+            request: CaptureRequest,
+            failure: CaptureFailure
+        ) {
+            if (!recording) return
+            Log.e(tag, "recording capture failed: reason=${failure.reason}")
+            // A failed capture means frames did not reach the encoder, so the pending MP4 is
+            // unusable; drop it and tell the user instead of publishing a broken file.
+            finishRecording(save = false, reconfigure = true, errorOverride = "Recording failed")
+        }
+    }
+
+    private val stillCallback = object : CameraCaptureSession.CaptureCallback() {        override fun onCaptureCompleted(
             session: CameraCaptureSession,
             request: CaptureRequest,
             result: TotalCaptureResult
@@ -945,6 +1362,10 @@ class CameraController(
             val bytes = ByteArray(buffer.remaining())
             buffer.get(bytes)
             Log.i(tag, "JPEG received: ${bytes.size} bytes")
+            // The watchdog guards the camera -> JPEG path only. A MediaStore write can take
+            // seconds on a busy device, so stop it here; saving reports its own result.
+            captureWatchdog?.let { cameraHandler.removeCallbacks(it) }
+            captureWatchdog = null
             saver.save(bytes)
         } catch (t: Throwable) {
             Log.e(tag, "JPEG read failed", t)

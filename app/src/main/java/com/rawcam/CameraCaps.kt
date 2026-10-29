@@ -8,6 +8,7 @@ import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.params.ColorSpaceTransform
 import android.hardware.camera2.params.StreamConfigurationMap
+import android.media.MediaRecorder
 import android.util.Log
 import android.util.Size
 import com.rawcam.core.Aspect
@@ -316,6 +317,18 @@ object CameraCaps {
         val zoomRatioRange = logicalCharacteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
             ?.let { RangeF(it.lower, it.upper) }
 
+        // Video buffers come from the same stream map, but not every lens advertises a recorder
+        // output (logical-only or stills-only cameras). Fall back to its preview stream, which the
+        // encoder can still consume; VideoMath keeps only wide, recordable sizes.
+        val ownMap = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+        val videoSizes = ownMap?.getOutputSizes(MediaRecorder::class.java)?.map { it.toSizeI() }.orEmpty()
+            .ifEmpty { ownMap?.getOutputSizes(SurfaceTexture::class.java)?.map { it.toSizeI() }.orEmpty() }
+            .filter { it.width > it.height }
+            .sortedByDescending { it.area }
+        val videoFpsRanges = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+            ?.map { it.lower..it.upper }
+            .orEmpty()
+
         val focalEq = equivalentFocal(characteristics)
         val id = if (physicalId != null) "logical:$cameraId:physical:$physicalId" else "camera:$cameraId"
 
@@ -334,6 +347,8 @@ object CameraCaps {
             pixelArray = pixelArray,
             jpegSizes = jpegSizes.sortedByDescending { it.area },
             previewSizes = previewSizes.sortedByDescending { it.area },
+            videoSizes = videoSizes,
+            videoFpsRanges = videoFpsRanges,
             isoRange = isoRange,
             maxAnalogIso = characteristics.get(CameraCharacteristics.SENSOR_MAX_ANALOG_SENSITIVITY),
             exposureRange = exposureRange,
@@ -367,7 +382,8 @@ object CameraCaps {
             TAG,
             "lens id=$id mode=$mode facing=$facing focalEq=${"%.1f".format(focalEq)}mm " +
                 "iso=$isoRange shutter=$exposureRange focus=$minFocus manual=$manualSensor/$manualPost " +
-                "sizes=${jpegSizes.size} zoom=${zoomRatioRange} awb=${awbPresets.map { it.name }}"
+                "sizes=${jpegSizes.size} video=${videoSizes.firstOrNull()} fps=$videoFpsRanges " +
+                "zoom=${zoomRatioRange} awb=${awbPresets.map { it.name }}"
         )
         return profile
     }
@@ -410,6 +426,7 @@ object CameraCaps {
                 appendLine("  ${p.label} ${"%.1f".format(p.focalEquivalentMm)}mm  ${p.mode}")
                 appendLine("    id=${p.id}")
                 appendLine("    JPEG ${p.jpegSizes.firstOrNull()}  preview ${p.previewSizes.firstOrNull()}")
+                appendLine("    video ${p.videoSizes.firstOrNull() ?: "-"}  fps ${p.videoFpsRanges}")
                 appendLine("    manual exposure=${p.supportsManualExposure} focus=${p.supportsManualFocus} kelvin=${p.supportsKelvin}")
                 appendLine("    ISO=${p.isoRange} shutter=${p.exposureRange}")
                 appendLine("    focus=${p.minFocusDiopters}${if (p.focusCalibrated) " calibrated" else ""} flash=${p.flashAvailable}")
