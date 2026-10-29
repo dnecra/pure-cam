@@ -14,13 +14,16 @@ The release APK is about **1.8 MB** (unsigned).
 
 ## Requirements
 
-- Android 14 or newer (`minSdk = 34`, `targetSdk = 34`)
+- Android 14 or newer (`minSdk = 34`, `compileSdk = 37`, `targetSdk = 37`)
 - A camera that exposes JPEG output through Camera2
 - `CAMERA` is requested at launch; `RECORD_AUDIO` is requested the first time you record
   video and may be declined (clips are then silent). Photos and videos are written through
   MediaStore.
 
 ## Build
+
+The project targets the current Android Studio toolchain: **Gradle 9.8.2**, **AGP 9.4.1**,
+**Kotlin 2.4.21** (built-in Kotlin), **Compose BOM 2026.09.00**, and **JDK 17+**.
 
 ```powershell
 $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
@@ -43,7 +46,7 @@ configuration (or sign it with `apksigner`).
 
 ```powershell
 adb install -r app\build\outputs\apk\debug\app-debug.apk
-adb shell am start -n com.rawcam/.MainActivity
+adb shell am start -n com.necra.purecam/.MainActivity
 ```
 
 Photos are saved as `DCIM/Camera/IMG_yyyyMMdd_HHmmss.jpg`. The JPEG bytes are written
@@ -133,7 +136,7 @@ A Material 3 modal bottom sheet, limited to what the active lens advertises:
 The project follows the recommended Android layering behind a single activity:
 
 ```
-app/src/main/java/com/rawcam/
+app/src/main/java/com/necra/purecam/
   MainActivity.kt                 ComponentActivity: edge-to-edge, permission, OrientationHelper
   presentation/
     CameraUiState.kt              Immutable UI snapshot, timer mode, one-shot signals
@@ -161,7 +164,7 @@ app/src/main/java/com/rawcam/
     Model.kt, AspectMath.kt, ExposureMath.kt, FocusMath.kt,
     ManualFocus.kt, ManualWhiteBalance.kt, OrientationMath.kt, RequestBuilder.kt,
     VideoMath.kt                  Qualities, fps ranges, bitrate, duration, exposure clamp
-app/src/test/java/com/rawcam/core/
+app/src/test/java/com/necra/purecam/core/
   120 JVM unit tests covering the pure logic
 ```
 

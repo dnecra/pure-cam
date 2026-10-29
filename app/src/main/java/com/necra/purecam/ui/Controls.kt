@@ -64,6 +64,31 @@ import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+/** [clickable] with a light haptic tick on every successful tap. */
+@Composable
+internal fun Modifier.hapticClickable(
+    enabled: Boolean = true,
+    onClick: () -> Unit
+): Modifier {
+    val haptics = LocalHapticFeedback.current
+    return clickable(enabled = enabled) {
+        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        onClick()
+    }
+}
+
+/** Wraps a Material component's `onClick` so it ticks like the custom camera controls. */
+@Composable
+internal fun hapticAction(action: () -> Unit): () -> Unit {
+    val haptics = LocalHapticFeedback.current
+    return remember(action, haptics) {
+        {
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            action()
+        }
+    }
+}
+
 @Composable
 fun TopControls(
     state: CameraUiState,
@@ -132,7 +157,7 @@ private fun ControlButton(
                 color = if (active) accent.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.12f),
                 shape = CircleShape
             )
-            .clickable(enabled = enabled, onClick = onClick),
+            .hapticClickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Icon(
@@ -162,7 +187,7 @@ private fun TimerControl(timer: TimerMode, onClick: () -> Unit) {
                 color = if (label == null) Color.White.copy(alpha = 0.12f) else accent.copy(alpha = 0.6f),
                 shape = CircleShape
             )
-            .clickable(onClick = onClick),
+            .hapticClickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         if (label == null) {
@@ -299,7 +324,7 @@ private fun ModeTab(
         modifier = Modifier
             .clip(CircleShape)
             .background(if (selected) accent else Color.Transparent)
-            .clickable(enabled = enabled, onClick = onClick)
+            .hapticClickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 7.dp)
     ) {
         Text(
@@ -322,7 +347,7 @@ private fun VideoQualityPill(config: VideoConfig, enabled: Boolean, onClick: () 
         modifier = Modifier
             .clip(CircleShape)
             .border(1.dp, Color.White.copy(alpha = 0.12f), CircleShape)
-            .clickable(enabled = enabled, onClick = onClick)
+            .hapticClickable(enabled = enabled, onClick = onClick)
     ) {
         Text(
             text = "${config.quality.label}  ·  ${stringResource(R.string.frame_rate_value, config.fps)}",
@@ -355,7 +380,7 @@ private fun formatZoom(zoom: Float): String {
 }
 
 @Composable
-private fun LensPills(
+internal fun LensPills(
     lenses: List<LensProfile>,
     selectedId: String?,
     enabled: Boolean,
@@ -376,7 +401,7 @@ private fun LensPills(
                         color = if (selected) Color.Transparent else Color.White.copy(alpha = 0.18f),
                         shape = CircleShape
                     )
-                    .clickable(enabled = enabled) { onSelect(lens) }
+                    .hapticClickable(enabled = enabled) { onSelect(lens) }
                     .padding(horizontal = 14.dp, vertical = 7.dp)
             ) {
                 Text(
@@ -394,7 +419,7 @@ private fun LensPills(
 }
 
 @Composable
-private fun ShutterButton(
+internal fun ShutterButton(
     capturing: Boolean,
     recording: Boolean,
     videoMode: Boolean,
@@ -414,13 +439,13 @@ private fun ShutterButton(
     }
     Box(
         modifier = Modifier
-            .size(82.dp)
+            .size(76.dp)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
             }
             .border(4.dp, Color.White.copy(alpha = 0.92f), CircleShape)
-            .padding(8.dp)
+            .padding(7.dp)
             .clip(CircleShape)
             .background(accent)
             .clickable(
@@ -437,12 +462,12 @@ private fun ShutterButton(
         when {
             videoMode && recording -> Box(
                 modifier = Modifier
-                    .size(26.dp)
+                    .size(24.dp)
                     .clip(RoundedCornerShape(6.dp))
                     .background(Color.White)
             )
             capturing -> CircularProgressIndicator(
-                modifier = Modifier.size(28.dp),
+                modifier = Modifier.size(26.dp),
                 color = MaterialTheme.colorScheme.onPrimary,
                 strokeWidth = 2.5.dp
             )
@@ -451,7 +476,7 @@ private fun ShutterButton(
 }
 
 @Composable
-private fun FlipButton(enabled: Boolean, rotationDegrees: Int, onClick: () -> Unit) {
+internal fun FlipButton(enabled: Boolean, rotationDegrees: Int, onClick: () -> Unit) {
     val angle by animateFloatAsState(
         targetValue = OrientationMath.iconRotation(rotationDegrees).toFloat(),
         animationSpec = tween(durationMillis = 220),
@@ -459,11 +484,11 @@ private fun FlipButton(enabled: Boolean, rotationDegrees: Int, onClick: () -> Un
     )
     Box(
         modifier = Modifier
-            .size(52.dp)
+            .size(48.dp)
             .clip(CircleShape)
             .background(Color.Black.copy(alpha = 0.28f))
             .border(1.dp, Color.White.copy(alpha = 0.12f), CircleShape)
-            .clickable(enabled = enabled, onClick = onClick),
+            .hapticClickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Icon(
@@ -471,14 +496,14 @@ private fun FlipButton(enabled: Boolean, rotationDegrees: Int, onClick: () -> Un
             contentDescription = "Flip camera",
             tint = if (enabled) Color.White.copy(alpha = 0.92f) else Color.White.copy(alpha = 0.3f),
             modifier = Modifier
-                .size(24.dp)
+                .size(22.dp)
                 .graphicsLayer { rotationZ = angle }
         )
     }
 }
 
 @Composable
-private fun PhotoThumbnail(
+internal fun PhotoThumbnail(
     uri: android.net.Uri?,
     isVideo: Boolean,
     onClick: (android.net.Uri) -> Unit
@@ -490,11 +515,11 @@ private fun PhotoThumbnail(
     val shape = RoundedCornerShape(16.dp)
     Box(
         modifier = Modifier
-            .size(52.dp)
+            .size(48.dp)
             .clip(shape)
             .background(Color.Black.copy(alpha = 0.32f))
             .border(1.dp, Color.White.copy(alpha = 0.28f), shape)
-            .clickable(enabled = uri != null) { uri?.let(onClick) },
+            .hapticClickable(enabled = uri != null) { uri?.let(onClick) },
         contentAlignment = Alignment.Center
     ) {
         val bitmap = thumbnail
@@ -510,7 +535,7 @@ private fun PhotoThumbnail(
                 painter = painterResource(R.drawable.ic_photo),
                 contentDescription = null,
                 tint = Color.White.copy(alpha = 0.7f),
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(20.dp)
             )
         }
         if (isVideo && bitmap != null) {
@@ -550,7 +575,7 @@ fun RecordingPill(elapsedMs: Long, modifier: Modifier = Modifier) {
                 drawCircle(Color(0xFFFF5252), radius = size.minDimension / 2f, center = Offset(size.width / 2f, size.height / 2f))
             }
             Text(
-                text = com.rawcam.core.VideoMath.formatDuration(elapsedMs),
+                text = com.necra.purecam.core.VideoMath.formatDuration(elapsedMs),
                 style = MaterialTheme.typography.labelLarge,
                 color = Color.White
             )

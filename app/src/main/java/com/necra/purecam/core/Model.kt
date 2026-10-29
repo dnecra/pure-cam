@@ -66,6 +66,7 @@ enum class Aspect(val label: String, val ratio: Float) {
     R3_2("3:2", 3f / 2f),
     R16_9("16:9", 16f / 9f),
     R1_1("1:1", 1f),
+    R2_1("2:1", 2f),
     FULL("Full", 0f);
 
     val isFull: Boolean get() = this == FULL
@@ -109,17 +110,20 @@ data class CameraState(
     val zoom: Float,
     val exposure: ExposureMode,
     val focus: FocusMode,
-    val wb: WhiteBalanceMode
+    val wb: WhiteBalanceMode,
+    /** Selected JPEG buffer size; null means the lens's largest still size. */
+    val photoResolution: SizeI? = null
 ) {
     companion object {
-        fun defaults(profile: LensProfile): CameraState = CameraState(
+        fun defaults(profile: LensProfile, photoResolution: SizeI? = null): CameraState = CameraState(
             lens = profile,
             aspect = Aspect.R4_3,
             flash = false,
             zoom = 1f,
             exposure = ExposureMode.Auto,
             focus = FocusMode.Auto,
-            wb = WhiteBalanceMode.Auto
+            wb = WhiteBalanceMode.Auto,
+            photoResolution = photoResolution?.takeIf { it in profile.jpegSizes }
         )
     }
 
@@ -170,6 +174,7 @@ data class CameraState(
         lens = newLens,
         zoom = 1f,
         focus = FocusMode.Auto,
+        photoResolution = photoResolution?.takeIf { it in newLens.jpegSizes },
         exposure = when (exposure) {
             is ExposureMode.Manual -> ExposureMode.Manual(
                 newLens.isoRange?.clamp(exposure.iso) ?: exposure.iso,

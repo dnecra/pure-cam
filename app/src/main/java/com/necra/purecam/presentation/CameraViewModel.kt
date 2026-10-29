@@ -21,6 +21,7 @@ import com.necra.purecam.core.Facing
 import com.necra.purecam.core.FocusMode
 import com.necra.purecam.core.LensMode
 import com.necra.purecam.core.LensProfile
+import com.necra.purecam.core.SizeI
 import com.necra.purecam.core.VideoConfig
 import com.necra.purecam.core.VideoMath
 import com.necra.purecam.core.VideoQuality
@@ -37,6 +38,17 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
+
+/** Fixed white-balance cycle order; presets the active lens does not advertise are skipped. */
+private val WB_CYCLE = listOf(
+    WbPreset.DAYLIGHT,
+    WbPreset.CLOUDY_DAYLIGHT,
+    WbPreset.INCANDESCENT,
+    WbPreset.FLUORESCENT,
+    WbPreset.WARM_FLUORESCENT,
+    WbPreset.TWILIGHT,
+    WbPreset.SHADE
+)
 
 /**
  * Owns the camera session and turns user intents into [CameraUiState] snapshots.
@@ -84,7 +96,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         controller?.shutdown()
         controller = CameraController(getApplication(), textureView, this).also {
             preview = textureView
-            // Queued before start(), so a restored video mode is honoured from the first session.
+            // Queued before start(), so restored preferences are honoured from the first session.
+            it.setPreferredAspect(prefs.aspect)
+            it.setPreferredPhotoSize(prefs.photoResolution)
             it.setVideoMode(_uiState.value.videoMode)
             it.setDeviceRotation(_uiState.value.deviceRotation)
         }
@@ -221,19 +235,66 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
 
     fun zoomBy(factor: Float) {
         val s = _uiState.value.cameraState ?: return
+        setZoom(s.zoom * factor)
+    }
+
+    /** Sets the zoom ratio directly, clamped to the active lens's supported range. */
+    fun setZoom(zoom: Float) {
+        val s = _uiState.value.cameraState ?: return
         val max = s.lens.maxZoom.coerceAtLeast(1f)
-        val next = (s.zoom * factor).coerceIn(1f, max)
+        val next = zoom.coerceIn(1f, max)
         if (abs(next - s.zoom) < 0.002f) return
         _uiState.update { it.copy(zoom = next, cameraState = s.copy(zoom = next)) }
         controller?.setZoom(next)
     }
 
-    /** Double-tap: jump between 1x and a quick 2x crop. */
-    fun toggleQuickZoom() {
+    fun setAspect(aspect: Aspect) {
+        prefs.aspect = aspect
+        _uiState.update { it.copy(cameraState = it.cameraState?.copy(aspect = aspect)) }
+        controller?.setAspect(aspect)
+    }
+
+    /** Changes the still JPEG buffer; the controller rebuilds the session for the new size. */
+    fun setPhotoResolution(size: SizeI) {
+        if (_uiState.value.recording || _uiState.value.recordingStarting) return
         val s = _uiState.value.cameraState ?: return
-        val target = if (s.zoom > 1.05f) 1f else 2f.coerceAtMost(s.lens.maxZoom.coerceAtLeast(1f))
-        _uiState.update { it.copy(zoom = target, cameraState = s.copy(zoom = target)) }
-        controller?.setZoom(target)
+        if (size !in s.lens.jpegSizes) return
+        prefs.photoResolution = size
+        _uiState.update { it.copy(cameraState = s.copy(photoResolution = size)) }
+        controller?.setPhotoResolution(size)
+    }
+
+    /** Reports the viewfinder card aspect so the 2:1 option can fill it. */
+    fun setFullscreenAspect(aspect: Float) {
+        controller?.setFullscreenAspect(aspect)
+    }
+
+    /**
+     * Cycles Auto → the lens's white-balance presets → Auto. Only presets the lens advertises
+     * are offered, and the order is fixed so repeated taps are predictable.
+     */
+    fun cycleWhiteBalance() {
+        val s = _uiState.value.cameraState ?: return
+        val available = WB_CYCLE.filter { s.lens.awbPresets.contains(it) }
+        if (available.isEmpty()) return
+        val next = when (val current = s.wb) {
+            is WhiteBalanceMode.Auto -> WhiteBalanceMode.Preset(available.first())
+            is WhiteBalanceMode.Preset -> {
+                val index = available.indexOf(current.preset)
+                if (index in 0 until available.lastIndex) {
+                    WhiteBalanceMode.Preset(available[index + 1])
+                } else {
+                    WhiteBalanceMode.Auto
+                }
+            }
+            is WhiteBalanceMode.Kelvin -> WhiteBalanceMode.Auto
+        }
+        controller?.setWhiteBalance(next)
+    }
+
+    /** Exposure compensation in EV, applied on top of auto exposure. */
+    fun setExposureCompensation(ev: Float) {
+        controller?.setExposureCompensation(ev)
     }
 
     fun onShutter() {
@@ -373,7 +434,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     override fun onStateChanged(
         state: CameraState,
         plan: AspectPlan?,
-        aspects: List<Aspect>,
         strategy: LensMode
     ) {
         // A lens change (or a fallback) can land on a camera that cannot record; leave video mode
@@ -392,16 +452,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     }
 
     override fun onReadout(readout: LiveReadout) {
-        _uiState.update { current ->
-            val previous = current.readout
-            // The readout arrives ~5x per second. Only surface it when a displayed value
-            // changes so the control layer is not recomposed at that rate.
-            if (previous != null && previous.iso == readout.iso && previous.shutterNs == readout.shutterNs) {
-                current
-            } else {
-                current.copy(readout = readout)
-            }
-        }
+        // The ISO/shutter readout is no longer shown in the UI. Keeping it out of the state
+        // avoids recomposing the whole camera screen several times per second.
     }
 
     override fun onCaptureStarted(exposureNs: Long?) {

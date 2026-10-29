@@ -7,6 +7,7 @@ import com.necra.purecam.core.AspectPlan
 import com.necra.purecam.core.CameraState
 import com.necra.purecam.core.Facing
 import com.necra.purecam.core.LensProfile
+import com.necra.purecam.core.SizeI
 import com.necra.purecam.core.VideoConfig
 import com.necra.purecam.core.VideoMath
 import com.necra.purecam.core.VideoQuality
@@ -47,6 +48,19 @@ data class CameraUiState(
 
     val lenses: List<LensProfile> get() = lens?.let { catalog.lenses(it.facing) }.orEmpty()
 
+    /** Still buffer in use; null in state means the lens's largest JPEG. */
+    val photoResolution: SizeI?
+        get() = cameraState?.photoResolution ?: lens?.jpegSizes?.maxByOrNull { it.area }
+
+    /** Still resolutions offered in the settings sheet, largest first. */
+    val availablePhotoSizes: List<SizeI>
+        get() {
+            val all = lens?.jpegSizes.orEmpty().sortedByDescending { it.area }
+            val chosen = cameraState?.photoResolution
+            val top = all.take(8)
+            return if (chosen != null && chosen !in top) top + chosen else top
+        }
+
     val facing: Facing? get() = lens?.facing
 
     val videoMode: Boolean get() = captureMode == CaptureMode.VIDEO
@@ -76,9 +90,9 @@ data class CameraUiState(
     /** True when at least one control is out of Auto, used to highlight the tune button. */
     val manualControlsActive: Boolean
         get() = cameraState?.let { s ->
-            s.exposure !is com.rawcam.core.ExposureMode.Auto ||
-                s.focus !is com.rawcam.core.FocusMode.Auto ||
-                s.wb !is com.rawcam.core.WhiteBalanceMode.Auto
+            s.exposure !is com.necra.purecam.core.ExposureMode.Auto ||
+                s.focus !is com.necra.purecam.core.FocusMode.Auto ||
+                s.wb !is com.necra.purecam.core.WhiteBalanceMode.Auto
         } ?: false
 }
 

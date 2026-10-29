@@ -1,5 +1,6 @@
 package com.necra.purecam.ui
 
+import android.content.Context
 import android.graphics.Matrix
 import android.graphics.SurfaceTexture
 import android.net.Uri
@@ -54,7 +55,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -73,7 +73,7 @@ import kotlin.math.roundToInt
 
 /**
  * The lean camera screen: a full-bleed viewfinder with a small floating control layer.
- * Tap focuses, pinch zooms, double-tap toggles a quick 2x crop.
+ * Tap focuses and pinch zooms.
  */
 @Composable
 fun CameraScreen(
@@ -82,8 +82,7 @@ fun CameraScreen(
     snackbarHostState: SnackbarHostState,
     onOpenPhoto: (Uri) -> Unit
 ) {
-    var sheetOpen by rememberSaveable { mutableStateOf(false) }
-    var videoSheetOpen by rememberSaveable { mutableStateOf(false) }
+    var settingsOpen by rememberSaveable { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         CameraPreview(state = state, viewModel = viewModel)
@@ -138,7 +137,7 @@ fun CameraScreen(
             onFlash = viewModel::toggleFlash,
             onTimer = viewModel::cycleTimer,
             onGrid = viewModel::toggleGrid,
-            onManual = { sheetOpen = true },
+            onManual = { settingsOpen = true },
             modifier = Modifier.align(Alignment.TopCenter)
         )
 
@@ -149,7 +148,7 @@ fun CameraScreen(
             onSelectLens = viewModel::selectLens,
             onOpenPhoto = onOpenPhoto,
             onSelectMode = viewModel::setCaptureMode,
-            onVideoSettings = { videoSheetOpen = true },
+            onVideoSettings = { settingsOpen = true },
             modifier = Modifier.align(Alignment.BottomCenter)
         )
 
@@ -171,19 +170,11 @@ fun CameraScreen(
         }
     }
 
-    if (sheetOpen) {
-        ManualControlsSheet(
+    if (settingsOpen) {
+        CaptureSettingsSheet(
             state = state,
             viewModel = viewModel,
-            onDismiss = { sheetOpen = false }
-        )
-    }
-
-    if (videoSheetOpen) {
-        VideoSettingsSheet(
-            state = state,
-            viewModel = viewModel,
-            onDismiss = { videoSheetOpen = false }
+            onDismiss = { settingsOpen = false }
         )
     }
 }
@@ -192,36 +183,45 @@ fun CameraScreen(
  * TextureView hosted in Compose. The preview fills the whole window; a centre-crop matrix keeps
  * the sensor image upright and unstretched, and mirrors the front camera on screen only
  * (the saved JPEG stays unmirrored).
+ *
+ * The transform is applied synchronously from [onSizeChanged] so an animating viewfinder
+ * never shows a stretched frame while the ratio changes.
  */
 @Composable
-private fun CameraPreview(state: CameraUiState, viewModel: CameraViewModel) {
+internal fun CameraPreview(
+    state: CameraUiState,
+    viewModel: CameraViewModel,
+    onTap: ((Offset) -> Unit)? = null
+) {
     val density = LocalDensity.current
     val focusRingSize = with(density) { 76.dp.toPx() }
 
-    var viewSize by remember { mutableStateOf(IntSize.Zero) }
     var surfaceKey by remember { mutableIntStateOf(0) }
     var focusPoint by remember { mutableStateOf<Offset?>(null) }
     var focusPulse by remember { mutableIntStateOf(0) }
-    val textureRef = remember { mutableStateOf<TextureView?>(null) }
+    val textureRef = remember { mutableStateOf<PreviewTextureView?>(null) }
 
     val mirrored = state.facing == Facing.FRONT
-    val displayAspect = state.plan?.displayAspect
+    val contentAspect = state.plan?.contentAspect
 
-    LaunchedEffect(displayAspect, mirrored, viewSize, surfaceKey) {
-        textureRef.value?.setTransform(previewTransform(displayAspect, viewSize, mirrored))
+    LaunchedEffect(contentAspect, mirrored, surfaceKey) {
+        textureRef.value?.apply {
+            displayAspect = contentAspect
+            this.mirrored = mirrored
+            applyTransform()
+        }
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .onSizeChanged { viewSize = it }
             .pointerInput(Unit) {
                 detectTapGestures(
-                    onDoubleTap = { viewModel.toggleQuickZoom() },
                     onTap = { offset ->
                         focusPoint = offset
                         focusPulse++
                         viewModel.tapToFocus(offset.x, offset.y)
+                        onTap?.invoke(offset)
                     }
                 )
             }
@@ -234,7 +234,9 @@ private fun CameraPreview(state: CameraUiState, viewModel: CameraViewModel) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
-                TextureView(context).apply {
+                PreviewTextureView(context).apply {
+                    displayAspect = contentAspect
+                    this.mirrored = mirrored
                     surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                         override fun onSurfaceTextureAvailable(
                             surfaceTexture: SurfaceTexture,
@@ -242,6 +244,7 @@ private fun CameraPreview(state: CameraUiState, viewModel: CameraViewModel) {
                             height: Int
                         ) {
                             surfaceKey++
+                            applyTransform()
                             viewModel.onPreviewSurfaceAvailable()
                         }
 
@@ -266,6 +269,22 @@ private fun CameraPreview(state: CameraUiState, viewModel: CameraViewModel) {
 
         CaptureFlash(viewModel)
         FocusIndicator(focusPoint, focusPulse, focusRingSize)
+    }
+}
+
+/** A [TextureView] that keeps the centre-crop matrix in sync with its own size. */
+private class PreviewTextureView(context: Context) : TextureView(context) {
+
+    var displayAspect: Float? = null
+    var mirrored: Boolean = false
+
+    fun applyTransform() {
+        setTransform(previewTransform(displayAspect, IntSize(width, height), mirrored))
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        applyTransform()
     }
 }
 
@@ -339,7 +358,7 @@ private fun CaptureFlash(viewModel: CameraViewModel) {
 }
 
 @Composable
-private fun GridOverlay(visible: Boolean) {
+internal fun GridOverlay(visible: Boolean) {
     if (!visible) return
     Canvas(modifier = Modifier.fillMaxSize()) {
         val line = Color.White.copy(alpha = 0.32f)
@@ -354,7 +373,7 @@ private fun GridOverlay(visible: Boolean) {
 }
 
 @Composable
-private fun CountdownOverlay(countdown: Int?) {
+internal fun CountdownOverlay(countdown: Int?) {
     if (countdown == null) return
     val haptics = LocalHapticFeedback.current
     LaunchedEffect(countdown) {
@@ -379,7 +398,7 @@ private fun CountdownOverlay(countdown: Int?) {
 }
 
 @Composable
-private fun ReadoutPill(readout: LiveReadout?, modifier: Modifier = Modifier) {
+internal fun ReadoutPill(readout: LiveReadout?, modifier: Modifier = Modifier) {
     val parts = buildList {
         readout?.iso?.let { add("ISO $it") }
         readout?.shutterNs?.let { add(ExposureMath.formatShutter(it)) }

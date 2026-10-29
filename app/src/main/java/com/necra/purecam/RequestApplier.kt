@@ -59,6 +59,11 @@ object RequestApplier {
         spec.aeFps?.let {
             builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, android.util.Range(it.min, it.max))
         }
+        if (spec.aeMode == AeMode.AUTO) {
+            spec.exposureCompensation?.let {
+                builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, it)
+            }
+        }
         spec.iso?.let { builder.set(CaptureRequest.SENSOR_SENSITIVITY, it) }
         spec.exposureNs?.let { builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, it) }
         spec.frameDurationNs?.let { builder.set(CaptureRequest.SENSOR_FRAME_DURATION, it) }

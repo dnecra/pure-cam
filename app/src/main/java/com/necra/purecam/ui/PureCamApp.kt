@@ -21,7 +21,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -47,15 +46,14 @@ import com.necra.purecam.presentation.CameraSignal
 import com.necra.purecam.presentation.CameraViewModel
 
 /**
- * Root of the UI tree. Shows the permission gate, the camera screen, one-shot snackbars and
- * the camera error dialog. Keep this composable free of camera details: it only routes state.
+ * Root of the UI tree. Shows the permission gate, the camera screen and the camera error
+ * dialog. Keep this composable free of camera details: it only routes state.
  */
 @Composable
 fun PureCamApp(viewModel: CameraViewModel) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
-    val snackbarHostState = remember { SnackbarHostState() }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -78,13 +76,11 @@ fun PureCamApp(viewModel: CameraViewModel) {
         }
     }
 
-    LaunchedEffect(snackbarHostState, audioPermissionLauncher) {
+    LaunchedEffect(audioPermissionLauncher) {
         viewModel.signals.collect { signal ->
             when (signal) {
-                is CameraSignal.Message ->
-                    if (viewModel.uiState.value.hasPermission) {
-                        snackbarHostState.showSnackbar(signal.text)
-                    }
+                // Status messages are intentionally not surfaced as toasts/snackbars.
+                is CameraSignal.Message -> Unit
                 CameraSignal.RequestAudioPermission ->
                     audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 CameraSignal.CaptureFlash -> Unit
@@ -94,10 +90,9 @@ fun PureCamApp(viewModel: CameraViewModel) {
 
     Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
         if (state.hasPermission) {
-            CameraScreen(
+            GoogleCameraScreen(
                 state = state,
                 viewModel = viewModel,
-                snackbarHostState = snackbarHostState,
                 onOpenPhoto = { uri -> openMedia(context, uri) }
             )
         } else {
@@ -123,12 +118,12 @@ fun PureCamApp(viewModel: CameraViewModel) {
             title = { Text(stringResource(R.string.camera_error)) },
             text = { Text(message) },
             confirmButton = {
-                TextButton(onClick = viewModel::retryCamera) {
+                TextButton(onClick = hapticAction(viewModel::retryCamera)) {
                     Text(stringResource(R.string.retry))
                 }
             },
             dismissButton = {
-                TextButton(onClick = viewModel::dismissError) {
+                TextButton(onClick = hapticAction(viewModel::dismissError)) {
                     Text(stringResource(R.string.close))
                 }
             }
@@ -174,7 +169,7 @@ private fun PermissionScreen(permanentlyDenied: Boolean, onRequest: () -> Unit) 
             textAlign = TextAlign.Center
         )
         Spacer(Modifier.height(28.dp))
-        Button(onClick = onRequest, modifier = Modifier.fillMaxWidth()) {
+        Button(onClick = hapticAction(onRequest), modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(if (permanentlyDenied) R.string.open_settings else R.string.grant_permission))
         }
     }

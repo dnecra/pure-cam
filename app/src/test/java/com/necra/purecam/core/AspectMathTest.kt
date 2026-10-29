@@ -8,24 +8,11 @@ import org.junit.Test
 class AspectMathTest {
 
     @Test
-    fun supportedAspects_keepsOnlyNativeRatiosAndAlwaysFull() {
-        val sizes = listOf(SizeI(4000, 3000), SizeI(4000, 2250), SizeI(3000, 3000))
-
-        val aspects = AspectMath.supportedAspects(sizes)
-
-        assertEquals(listOf(Aspect.R4_3, Aspect.R16_9, Aspect.R1_1, Aspect.FULL), aspects)
-    }
-
-    @Test
-    fun supportedAspects_emptySizesStillOffersWorkingChoice() {
-        assertEquals(listOf(Aspect.R4_3, Aspect.FULL), AspectMath.supportedAspects(emptyList()))
-    }
-
-    @Test
-    fun supportedAspects_unusualRatiosFallBackToFourThree() {
-        val aspects = AspectMath.supportedAspects(listOf(SizeI(1000, 800)))
-
-        assertEquals(listOf(Aspect.R4_3, Aspect.FULL), aspects)
+    fun cropAspects_areAlwaysOfferedInCycleOrder() {
+        assertEquals(
+            listOf(Aspect.R4_3, Aspect.R16_9, Aspect.R1_1, Aspect.R2_1),
+            AspectMath.CROP_ASPECTS
+        )
     }
 
     @Test
@@ -130,14 +117,31 @@ class AspectMathTest {
     }
 
     @Test
+    fun plan_keepsNativeJpegAndOnlyChangesTheDisplayAspect() {
+        val profile = TestProfiles.lens(sensorOrientation = 90)
+
+        val plan = AspectMath.plan(profile, Aspect.R16_9, screenAspect = 0.5f)
+
+        // The capture stream never changes; the requested ratio is a crop of that buffer.
+        assertEquals(16f / 9f, plan.targetAspect, 1e-6f)
+        assertEquals(4f / 3f, plan.outputAspect, 1e-6f)
+        assertEquals(SizeI(4000, 3000), plan.jpegSize)
+        assertEquals(SizeI(1920, 1440), plan.previewSize)
+        assertEquals(9f / 16f, plan.displayAspect, 1e-6f)
+        assertEquals(3f / 4f, plan.contentAspect, 1e-6f)
+        assertEquals(RectI(0, 0, 4000, 3000), plan.crop)
+    }
+
+    @Test
     fun plan_fullModeUsesScreenAspectForRotatedSensor() {
         val profile = TestProfiles.lens(sensorOrientation = 90)
 
         val plan = AspectMath.plan(profile, Aspect.FULL, screenAspect = 0.5f)
 
         assertEquals(2f, plan.targetAspect, 1e-6f)
-        assertEquals(SizeI(4000, 2250), plan.jpegSize)
-        assertEquals(1f / (4000f / 2250f), plan.displayAspect, 1e-6f)
+        assertEquals(SizeI(4000, 3000), plan.jpegSize)
+        assertEquals(0.5f, plan.displayAspect, 1e-6f)
+        assertEquals(0.75f, plan.contentAspect, 1e-6f)
     }
 
     @Test
@@ -148,6 +152,47 @@ class AspectMathTest {
 
         assertEquals(SizeI(4000, 3000), plan.jpegSize)
         assertEquals(SizeI(4000, 3000), plan.previewSize)
+    }
+
+    @Test
+    fun plan_usesSelectedJpegSizeWhenProvided() {
+        val profile = TestProfiles.lens(sensorOrientation = 90)
+        val selected = SizeI(4000, 2250)
+
+        val plan = AspectMath.plan(
+            profile,
+            Aspect.R4_3,
+            screenAspect = 0.5f,
+            jpegSize = selected
+        )
+
+        assertEquals(selected, plan.jpegSize)
+        assertEquals(SizeI(1920, 1080), plan.previewSize)
+    }
+
+    @Test
+    fun savedSize_swapsAxesForRotatedSensors() {
+        val profile = TestProfiles.lens(sensorOrientation = 90)
+
+        val fourThree = AspectMath.plan(profile, Aspect.R4_3, screenAspect = 0.5f)
+        assertEquals(SizeI(3000, 4000), AspectMath.savedSize(fourThree, 90))
+
+        val wide = AspectMath.plan(profile, Aspect.R16_9, screenAspect = 0.5f)
+        assertEquals(SizeI(2250, 4000), AspectMath.savedSize(wide, 90))
+    }
+
+    @Test
+    fun savedSize_capsTheLongEdge() {
+        val profile = TestProfiles.lens(
+            sensorOrientation = 0,
+            jpegSizes = listOf(SizeI(8192, 6144))
+        )
+
+        val plan = AspectMath.plan(profile, Aspect.R4_3, screenAspect = 0.5f)
+        val saved = AspectMath.savedSize(plan, 0)
+
+        assertEquals(4096, saved.width)
+        assertEquals(3072, saved.height)
     }
 
     @Test

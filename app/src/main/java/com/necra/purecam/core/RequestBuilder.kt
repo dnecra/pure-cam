@@ -37,6 +37,8 @@ data class RequestSpec(
     val tonemap: TonemapSetting,
     val iso: Int?,
     val exposureNs: Long?,
+    /** Auto-exposure compensation in device steps; null when AE is off. */
+    val exposureCompensation: Int?,
     val frameDurationNs: Long?,
     val postRawBoost: Int?,
     val zoomRatio: Float?,
@@ -79,7 +81,8 @@ object RequestBuilder {
         fallbackTransform: FloatArray? = null,
         videoFps: Int? = null,
         videoFpsRange: RangeI? = null,
-        videoMode: Boolean = false
+        videoMode: Boolean = false,
+        exposureCompensation: Int? = null
     ): RequestSpec {
         val manual = state.exposure as? ExposureMode.Manual
         val useManual = manual != null && profile.supportsManualExposure
@@ -197,6 +200,7 @@ object RequestBuilder {
             tonemap = if (profile.tonemapPresetCurve) TonemapSetting.SRGB_PRESET else TonemapSetting.FAST,
             iso = exposure?.iso,
             exposureNs = exposure?.shutterNs,
+            exposureCompensation = if (useManual) null else exposureCompensation,
             frameDurationNs = if (record) {
                 VideoMath.frameDurationNs(fps)
             } else {

@@ -11,8 +11,6 @@ import android.hardware.camera2.params.StreamConfigurationMap
 import android.media.MediaRecorder
 import android.util.Log
 import android.util.Size
-import com.necra.purecam.core.Aspect
-import com.necra.purecam.core.AspectMath
 import com.necra.purecam.core.Facing
 import com.necra.purecam.core.LensMode
 import com.necra.purecam.core.LensProfile
@@ -412,8 +410,6 @@ object CameraCaps {
         CameraMetadata.CONTROL_AWB_MODE_SHADE -> WbPreset.SHADE
         else -> null
     }
-
-    fun aspectsFor(profile: LensProfile): List<Aspect> = AspectMath.supportedAspects(profile.jpegSizes)
 
     fun report(catalog: LensCatalog): String = buildString {
         appendLine("PureCam capability report")

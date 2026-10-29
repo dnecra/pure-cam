@@ -32,8 +32,9 @@ internal fun openMedia(context: Context, uri: Uri) {
     val view = Intent(Intent.ACTION_VIEW)
         .setDataAndType(uri, mime)
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    val chooser = Intent.createChooser(view, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    runCatching { context.startActivity(chooser) }.onFailure {
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    // No chooser: Android then remembers the user's "Always" choice for this file type.
+    runCatching { context.startActivity(view) }.onFailure {
         Toast.makeText(context, R.string.open_photo_failed, Toast.LENGTH_SHORT).show()
     }
 }
