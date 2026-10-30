@@ -35,22 +35,30 @@ object VideoMath {
     /** MediaRecorder needs a few frames before the MP4 header is valid. */
     const val MIN_RECORDING_MS = 500L
 
-    private const val WIDE_TOLERANCE = 0.02f
-
-    /** Landscape, 16:9-ish buffers that a camera can actually stream to an encoder. */
+    /** Landscape buffers that a camera advertises for encoder output, at any aspect ratio. */
     fun recordableSizes(sizes: List<SizeI>): List<SizeI> =
-        sizes.filter { it.width > it.height && it.width <= 4096 && abs(it.aspect - 16f / 9f) < WIDE_TOLERANCE }
+        sizes.filter { it.width > it.height && it.width <= 4096 }
             .sortedByDescending { it.area }
 
-    /** The stream that matches [quality] on this lens, or null when the lens cannot do it. */
-    fun sizeFor(quality: VideoQuality, sizes: List<SizeI>): SizeI? {
+    /** Pick a supported encoder size for the quality tier, preferring the camera's native ratio. */
+    fun sizeFor(
+        quality: VideoQuality,
+        sizes: List<SizeI>,
+        preferredAspect: Float? = null
+    ): SizeI? {
         val pool = recordableSizes(sizes)
         if (pool.isEmpty()) return null
-        // The canonical encoder buffer wins over a slightly larger sensor crop: hardware
-        // stream combinations are specified for the standard size (e.g. 3840x2160, not the
-        // 4032x2268 16:9 crop of a 4:3 sensor).
-        pool.firstOrNull { it.width == quality.width && it.height == quality.height }?.let { return it }
         val tolerance = (quality.width * 0.05f).coerceAtLeast(48f)
+        val tierSizes = pool.filter { abs(it.width - quality.width) <= tolerance }
+        val nativeRatio = preferredAspect?.takeIf { it.isFinite() && it > 0f }
+        if (nativeRatio != null && tierSizes.isNotEmpty()) {
+            return tierSizes.minWithOrNull(
+                compareBy<SizeI> { AspectMath.relativeAspectError(it.aspect, nativeRatio) }
+                    .thenBy { abs(it.width - quality.width) }
+                    .thenByDescending { it.area }
+            )
+        }
+        pool.firstOrNull { it.width == quality.width && it.height == quality.height }?.let { return it }
         return pool.filter {
             abs(it.width - quality.width) <= tolerance && abs(it.height - quality.height) <= tolerance
         }.minByOrNull { abs(it.width - quality.width) }
@@ -58,8 +66,8 @@ object VideoMath {
                 .minByOrNull { abs(it.width - quality.width) }
     }
 
-    fun availableQualities(sizes: List<SizeI>): List<VideoQuality> =
-        VideoQuality.entries.filter { sizeFor(it, sizes) != null }
+    fun availableQualities(sizes: List<SizeI>, preferredAspect: Float? = null): List<VideoQuality> =
+        VideoQuality.entries.filter { sizeFor(it, sizes, preferredAspect) != null }
 
     /** Prefer 1080p, then 720p, then whatever else the lens offers. */
     fun defaultQuality(available: List<VideoQuality>): VideoQuality? =

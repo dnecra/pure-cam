@@ -8,6 +8,7 @@
     <string name="flash">Flash</string>
     <string name="timer">Timer</string>
     <string name="flip_camera">Flip camera</string>
+    <string name="wb">White balance</string>
     <string name="retry">Retry</string>
     <string name="camera_error">Camera error</string>
     <string name="close">Close</string>
@@ -29,63 +30,15 @@
     <!-- Video -->
     <string name="mode_photo">Photo</string>
     <string name="mode_video">Video</string>
-    <string name="mode_switch">Photo and video</string>
     <string name="capture_settings">Capture settings</string>
+    <string name="photo_full_resolution">Full sensor resolution · %1$s</string>
+    <string name="photo_format_hint">Photos are saved as JPG at the camera\'s native aspect ratio.</string>
+    <string name="resolution">Resolution</string>
     <string name="frame_rate">Frame rate</string>
     <string name="frame_rate_value">%1$d fps</string>
-    <string name="frame_rate_standard_hint">Standard smoothness</string>
-    <string name="frame_rate_smooth_hint">Extra smooth motion</string>
+    <string name="video_summary">%1$d × %2$d · %3$d fps · %4$s</string>
+    <string name="video_no_processing_hint">Recorded with the camera\'s raw pipeline: noise reduction, sharpening, distortion and stabilization stay off.</string>
     <string name="video_saved">Video saved to DCIM/Camera</string>
     <string name="video_unavailable">This lens cannot record video</string>
     <string name="recording_without_audio">Recording without sound</string>
-    <string name="recording_time">%1$02d:%2$02d</string>
-    <string name="countdown_value">%1$d</string>
-
-    <!-- Camera screen chrome -->
-    <string name="shutter">Shutter</string>
-    <string name="shutter_take_photo">Take photo</string>
-    <string name="shutter_start_recording">Start recording</string>
-    <string name="shutter_stop_recording">Stop recording</string>
-    <string name="shutter_busy">Capture in progress</string>
-    <string name="white_balance">White balance</string>
-    <string name="last_video">Last video</string>
-    <string name="state_on">On</string>
-    <string name="state_off">Off</string>
-    <string name="timer_state_off">Off</string>
-    <string name="timer_state_3s">3 seconds</string>
-    <string name="timer_state_10s">10 seconds</string>
-    <string name="summary_photo">%1$s MP</string>
-    <string name="summary_photo_crop">%1$s MP · %2$s</string>
-    <string name="summary_video">%1$s · %2$d fps</string>
-    <string name="summary_unknown">Camera</string>
-
-    <!-- Capture settings -->
-    <string name="settings_manual_controls">Manual controls</string>
-    <string name="settings_manual_controls_hint">Exposure, focus and white balance</string>
-    <string name="settings_video">Video quality and frame rate</string>
-    <string name="settings_video_hint">Encoder size and frame rate</string>
-    <string name="video_quality_title">Video quality</string>
-    <string name="save_crop">Save crop</string>
-    <string name="save_crop_raw">Original</string>
-    <string name="save_crop_raw_option">Original (full sensor)</string>
-    <string name="save_crop_raw_hint">Full sensor resolution</string>
-    <string name="save_crop_16_9">16:9</string>
-    <string name="save_crop_16_9_hint">Centre crop to 16:9</string>
-    <string name="save_crop_fullscreen">Fullscreen</string>
-    <string name="save_crop_fullscreen_hint">Centre crop to the screen shape</string>
-    <string name="apply">Apply</string>
-    <string name="kelvin">Kelvin</string>
-    <string name="kelvin_value">%1$d K</string>
-    <string name="color_temperature">Color temperature</string>
-    <string name="exposure">Exposure</string>
-    <string name="focus">Focus</string>
-    <string name="auto">Auto</string>
-    <string name="manual">Manual</string>
-    <string name="choose">Choose</string>
-    <string name="iso_value">ISO %1$d</string>
-    <string name="shutter_value">Shutter %1$s</string>
-    <string name="focus_value">Focus %1$s</string>
-    <string name="focus_infinity">Focus ∞</string>
-    <string name="manual_not_supported">This lens does not expose manual controls.</string>
-    <string name="no_video_options">This lens has no recording options.</string>
 </resources>

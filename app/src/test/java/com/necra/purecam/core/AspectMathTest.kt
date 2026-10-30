@@ -1,45 +1,36 @@
 package com.necra.purecam.core
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AspectMathTest {
 
     @Test
-    fun cropAspects_areListedInCycleOrder() {
-        assertEquals(
-            listOf(Aspect.R4_3, Aspect.R16_9, Aspect.R1_1, Aspect.R2_1),
-            AspectMath.CROP_ASPECTS
-        )
+    fun planNative_keepsLargestJpegRatioAndFitsRotatedPreview() {
+        val profile = TestProfiles.lens(sensorOrientation = 90)
+
+        val plan = AspectMath.planNative(profile)
+
+        assertEquals(4f / 3f, plan.outputAspect, 1e-6f)
+        assertEquals(SizeI(4000, 3000), plan.jpegSize)
+        assertEquals(SizeI(1920, 1440), plan.previewSize)
+        assertEquals(0.75f, plan.displayAspect, 1e-6f)
+        assertEquals(0.75f, plan.contentAspect, 1e-6f)
     }
 
     @Test
-    fun relativeAspectError_isSymmetricAndRejectsNonPositive() {
-        val a = AspectMath.relativeAspectError(4f / 3f, 16f / 9f)
-        val b = AspectMath.relativeAspectError(16f / 9f, 4f / 3f)
+    fun planForOutput_keepsTheEncoderStreamRatio() {
+        val profile = TestProfiles.lens(sensorOrientation = 90)
 
-        assertEquals(a, b, 1e-6f)
-        assertTrue(a > 0f)
-        assertEquals(Float.MAX_VALUE, AspectMath.relativeAspectError(0f, 1f), 0f)
+        val plan = AspectMath.planForOutput(profile, SizeI(1920, 1080))
+
+        assertEquals(16f / 9f, plan.outputAspect, 1e-6f)
+        assertEquals(9f / 16f, plan.displayAspect, 1e-6f)
     }
 
     @Test
-    fun bestSize_prefersClosestAspectThenLargestArea() {
-        val sizes = listOf(
-            SizeI(1000, 750),
-            SizeI(2000, 1500),
-            SizeI(1920, 1080)
-        )
-
-        assertEquals(SizeI(2000, 1500), AspectMath.bestSize(sizes, 4f / 3f))
-        assertEquals(SizeI(1920, 1080), AspectMath.bestSize(sizes, 16f / 9f))
-        assertEquals(null, AspectMath.bestSize(emptyList(), 4f / 3f))
-    }
-
-    @Test
-    fun previewSize_respectsWidthCapAndAspect() {
+    fun previewSize_respectsWidthCapAndPrefersMatchingStreamRatio() {
         val sizes = listOf(
             SizeI(4000, 3000),
             SizeI(1920, 1440),
@@ -52,37 +43,11 @@ class AspectMathTest {
     }
 
     @Test
-    fun cropRect_fullSensorAtZoomOne() {
-        val crop = AspectMath.cropRect(RectI(0, 0, 4000, 3000), 4f / 3f, 1f)
-
-        assertEquals(RectI(0, 0, 4000, 3000), crop)
-    }
-
-    @Test
-    fun cropRect_squareIsCentered() {
-        val crop = AspectMath.cropRect(RectI(0, 0, 4000, 3000), 1f, 1f)
-
-        assertEquals(RectI(500, 0, 3500, 3000), crop)
-    }
-
-    @Test
-    fun cropRect_zoomIsCenteredAndKeepsAspect() {
+    fun cropRect_zoomIsCenteredAndKeepsStreamRatio() {
         val crop = AspectMath.cropRect(RectI(0, 0, 4000, 3000), 4f / 3f, 2f)
 
         assertEquals(RectI(1000, 750, 3000, 2250), crop)
         assertEquals(4f / 3f, crop.aspect, 1e-6f)
-    }
-
-    @Test
-    fun cropRect_offsetsActiveArrayAndForcesEvenDimensions() {
-        val crop = AspectMath.cropRect(RectI(100, 50, 4101, 3051), 4f / 3f, 1f)
-
-        assertEquals(0, crop.width % 2)
-        assertEquals(0, crop.height % 2)
-        assertEquals(100 + (4001 - crop.width) / 2, crop.left)
-        assertEquals(50 + (3001 - crop.height) / 2, crop.top)
-        assertTrue(crop.right <= 4101)
-        assertTrue(crop.bottom <= 3051)
     }
 
     @Test
@@ -92,192 +57,5 @@ class AspectMathTest {
 
         assertTrue(narrow.width > 0 && narrow.height > 0)
         assertTrue(wide.width > 0 && wide.height > 0)
-        assertTrue(narrow.height <= 3000)
-    }
-
-    @Test
-    fun sensorTargetAspect_invertsScreenAspectForRotatedSensors() {
-        assertEquals(4f / 3f, AspectMath.sensorTargetAspect(Aspect.R4_3, 0.5f, 90), 1e-6f)
-        assertEquals(2f, AspectMath.sensorTargetAspect(Aspect.FULL, 0.5f, 90), 1e-6f)
-        assertEquals(0.5f, AspectMath.sensorTargetAspect(Aspect.FULL, 0.5f, 0), 1e-6f)
-    }
-
-    @Test
-    fun plan_sizesJpegPreviewAndDisplayForRotatedSensor() {
-        val profile = TestProfiles.lens(sensorOrientation = 90)
-
-        val plan = AspectMath.plan(profile, Aspect.R4_3, screenAspect = 0.5f)
-
-        assertEquals(4f / 3f, plan.targetAspect, 1e-6f)
-        assertEquals(4f / 3f, plan.outputAspect, 1e-6f)
-        assertEquals(SizeI(4000, 3000), plan.jpegSize)
-        assertEquals(SizeI(1920, 1440), plan.previewSize)
-        assertEquals(0.75f, plan.displayAspect, 1e-6f)
-        assertEquals(RectI(0, 0, 4000, 3000), plan.crop)
-    }
-
-    @Test
-    fun plan_keepsNativeJpegAndOnlyChangesTheDisplayAspect() {
-        val profile = TestProfiles.lens(sensorOrientation = 90)
-
-        val plan = AspectMath.plan(profile, Aspect.R16_9, screenAspect = 0.5f)
-
-        // The capture stream never changes; the requested ratio is a crop of that buffer.
-        assertEquals(16f / 9f, plan.targetAspect, 1e-6f)
-        assertEquals(4f / 3f, plan.outputAspect, 1e-6f)
-        assertEquals(SizeI(4000, 3000), plan.jpegSize)
-        assertEquals(SizeI(1920, 1440), plan.previewSize)
-        assertEquals(9f / 16f, plan.displayAspect, 1e-6f)
-        assertEquals(3f / 4f, plan.contentAspect, 1e-6f)
-        assertEquals(RectI(0, 0, 4000, 3000), plan.crop)
-    }
-
-    @Test
-    fun plan_fullModeUsesScreenAspectForRotatedSensor() {
-        val profile = TestProfiles.lens(sensorOrientation = 90)
-
-        val plan = AspectMath.plan(profile, Aspect.FULL, screenAspect = 0.5f)
-
-        assertEquals(2f, plan.targetAspect, 1e-6f)
-        assertEquals(SizeI(4000, 3000), plan.jpegSize)
-        assertEquals(0.5f, plan.displayAspect, 1e-6f)
-        assertEquals(0.75f, plan.contentAspect, 1e-6f)
-    }
-
-    @Test
-    fun plan_fullModePrefersTheViewfinderAspect() {
-        val profile = TestProfiles.lens(sensorOrientation = 90)
-
-        val plan = AspectMath.plan(
-            profile,
-            Aspect.FULL,
-            screenAspect = 0.5f,
-            fullscreenAspect = 0.6f
-        )
-
-        assertEquals(1f / 0.6f, plan.targetAspect, 1e-6f)
-        assertEquals(0.6f, plan.displayAspect, 1e-6f)
-    }
-
-    @Test
-    fun plan_twoToOneStaysATrueTwoToOneCrop() {
-        val profile = TestProfiles.lens(sensorOrientation = 90)
-
-        val plan = AspectMath.plan(
-            profile,
-            Aspect.R2_1,
-            screenAspect = 0.5f,
-            fullscreenAspect = 0.6f
-        )
-
-        assertEquals(2f, plan.targetAspect, 1e-6f)
-        assertEquals(0.5f, plan.displayAspect, 1e-6f)
-    }
-
-    @Test
-    fun plan_fallsBackToActiveArrayWithoutJpegSizes() {
-        val profile = TestProfiles.lens(jpegSizes = emptyList(), previewSizes = emptyList())
-
-        val plan = AspectMath.plan(profile, Aspect.R4_3, screenAspect = 0.5f)
-
-        assertEquals(SizeI(4000, 3000), plan.jpegSize)
-        assertEquals(SizeI(4000, 3000), plan.previewSize)
-    }
-
-    @Test
-    fun plan_alwaysUsesTheLargestJpegBuffer() {
-        val profile = TestProfiles.lens(
-            sensorOrientation = 90,
-            jpegSizes = listOf(SizeI(4000, 3000), SizeI(4000, 2250), SizeI(3000, 3000))
-        )
-
-        val plan = AspectMath.plan(profile, Aspect.R16_9, screenAspect = 0.5f)
-
-        assertEquals(SizeI(4000, 3000), plan.jpegSize)
-    }
-
-    @Test
-    fun rawPlan_usesNativeJpegAspectAndUprightDisplay() {
-        val profile = TestProfiles.lens(sensorOrientation = 90)
-
-        val plan = AspectMath.rawPlan(profile)
-
-        assertEquals(SizeI(4000, 3000), plan.jpegSize)
-        assertEquals(4f / 3f, plan.targetAspect, 1e-6f)
-        assertEquals(4f / 3f, plan.outputAspect, 1e-6f)
-        assertEquals(3f / 4f, plan.displayAspect, 1e-6f)
-        assertEquals(3f / 4f, plan.contentAspect, 1e-6f)
-    }
-
-    @Test
-    fun saveCropAspect_mapsOptionsToSensorRatio() {
-        assertEquals(0f, AspectMath.saveCropAspect(SaveCrop.RAW, 0.5f, 90), 0f)
-        assertEquals(16f / 9f, AspectMath.saveCropAspect(SaveCrop.R16_9, 0.5f, 90), 1e-6f)
-        assertEquals(2f, AspectMath.saveCropAspect(SaveCrop.FULLSCREEN, 0.5f, 90), 1e-6f)
-        assertEquals(0.5f, AspectMath.saveCropAspect(SaveCrop.FULLSCREEN, 0.5f, 0), 1e-6f)
-    }
-
-    @Test
-    fun savedSize_rawKeepsFullResolutionAndCropShrinks() {
-        val jpeg = SizeI(4000, 3000)
-
-        assertEquals(SizeI(4000, 3000), AspectMath.savedSize(jpeg, 0f, 90))
-        assertEquals(SizeI(2250, 4000), AspectMath.savedSize(jpeg, 16f / 9f, 90))
-    }
-
-    @Test
-    fun savedSize_swapsAxesForRotatedSensors() {
-        val profile = TestProfiles.lens(sensorOrientation = 90)
-
-        val fourThree = AspectMath.plan(profile, Aspect.R4_3, screenAspect = 0.5f)
-        assertEquals(SizeI(3000, 4000), AspectMath.savedSize(fourThree, 90))
-
-        val wide = AspectMath.plan(profile, Aspect.R16_9, screenAspect = 0.5f)
-        assertEquals(SizeI(2250, 4000), AspectMath.savedSize(wide, 90))
-    }
-
-    @Test
-    fun savedSize_capsTheLongEdge() {
-        val profile = TestProfiles.lens(
-            sensorOrientation = 0,
-            jpegSizes = listOf(SizeI(8192, 6144))
-        )
-
-        val plan = AspectMath.plan(profile, Aspect.R4_3, screenAspect = 0.5f)
-        val saved = AspectMath.savedSize(plan, 0)
-
-        assertEquals(4096, saved.width)
-        assertEquals(3072, saved.height)
-    }
-
-    @Test
-    fun centerCropFractions_matchesTransformDirection() {
-        val wide = AspectMath.centerCropFractions(16f / 9f, 4f / 3f)
-        assertEquals(0.75f, wide[0], 1e-6f)
-        assertEquals(0.125f, wide[1], 1e-6f)
-        assertEquals(1f, wide[2], 1e-6f)
-        assertEquals(0f, wide[3], 1e-6f)
-
-        val tall = AspectMath.centerCropFractions(4f / 3f, 16f / 9f)
-        assertEquals(1f, tall[0], 1e-6f)
-        assertEquals(0f, tall[1], 1e-6f)
-        assertEquals(0.75f, tall[2], 1e-6f)
-        assertEquals(0.125f, tall[3], 1e-6f)
-    }
-
-    @Test
-    fun plan_neverReturnsNullSizes() {
-        val profile = TestProfiles.lens(
-            activeArray = RectI(0, 0, 1, 1),
-            jpegSizes = emptyList(),
-            previewSizes = emptyList()
-        )
-
-        val plan = AspectMath.plan(profile, Aspect.R4_3, screenAspect = 0.5f)
-
-        assertNotNull(plan.jpegSize)
-        assertNotNull(plan.previewSize)
-        assertTrue(plan.crop.width > 0)
-        assertTrue(plan.crop.height > 0)
     }
 }

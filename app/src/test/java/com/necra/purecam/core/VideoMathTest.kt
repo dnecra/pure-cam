@@ -11,7 +11,7 @@ class VideoMathTest {
     private val lens = TestProfiles.lens()
 
     @Test
-    fun recordableSizes_keepOnlyLandscape16By9Buffers() {
+    fun recordableSizes_keepLandscapeBuffersAtAnyAspectRatio() {
         val sizes = listOf(
             SizeI(1920, 1080),
             SizeI(1080, 1920),
@@ -22,7 +22,7 @@ class VideoMathTest {
         )
 
         assertEquals(
-            listOf(SizeI(3840, 2160), SizeI(1920, 1088), SizeI(1920, 1080)),
+            listOf(SizeI(4000, 3000), SizeI(3840, 2160), SizeI(1920, 1088), SizeI(1920, 1080)),
             VideoMath.recordableSizes(sizes)
         )
     }
@@ -35,6 +35,19 @@ class VideoMathTest {
         assertEquals(SizeI(1920, 1080), VideoMath.sizeFor(VideoQuality.FHD_1080P, sizes))
         assertEquals(SizeI(1280, 720), VideoMath.sizeFor(VideoQuality.HD_720P, sizes))
         assertNull(VideoMath.sizeFor(VideoQuality.UHD_4K, listOf(SizeI(1920, 1080))))
+    }
+
+    @Test
+    fun sizeFor_prefersNativeAspectWithinEachQualityTier() {
+        val sizes = listOf(
+            SizeI(3840, 2160), SizeI(3840, 2880),
+            SizeI(1920, 1080), SizeI(1920, 1440),
+            SizeI(1280, 720), SizeI(1280, 960)
+        )
+
+        assertEquals(SizeI(3840, 2880), VideoMath.sizeFor(VideoQuality.UHD_4K, sizes, 4f / 3f))
+        assertEquals(SizeI(1920, 1440), VideoMath.sizeFor(VideoQuality.FHD_1080P, sizes, 4f / 3f))
+        assertEquals(SizeI(1280, 960), VideoMath.sizeFor(VideoQuality.HD_720P, sizes, 4f / 3f))
     }
 
     @Test
@@ -63,7 +76,10 @@ class VideoMathTest {
             VideoMath.defaultQuality(listOf(VideoQuality.HD_720P, VideoQuality.UHD_4K))
         )
         assertNull(VideoMath.defaultQuality(emptyList()))
-        assertEquals(emptyList<VideoQuality>(), VideoMath.availableQualities(listOf(SizeI(4000, 3000))))
+        assertEquals(
+            listOf(VideoQuality.UHD_4K),
+            VideoMath.availableQualities(listOf(SizeI(4000, 3000)))
+        )
     }
 
     @Test

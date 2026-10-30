@@ -39,10 +39,8 @@ import com.necra.purecam.core.OrientationMath
 import com.necra.purecam.core.RangeI
 import com.necra.purecam.core.RequestBuilder
 import com.necra.purecam.core.RequestSpec
-import com.necra.purecam.core.SaveCrop
 import com.necra.purecam.core.VideoConfig
 import com.necra.purecam.core.VideoMath
-import com.necra.purecam.core.VideoQuality
 import com.necra.purecam.core.WhiteBalanceMode
 import java.util.concurrent.Executor
 import kotlin.math.roundToInt
@@ -133,26 +131,11 @@ class CameraController(
     private var pending: PendingCapture? = null
     private var stillSpec: RequestSpec? = null
     private var stillLens: LensProfile? = null
-    /** Crop ratio (sensor coordinates) and EXIF rotation captured with the still request. */
-    private var stillCropAspect = 0f
-    private var stillOrientation = 0
-    private var stillMirror = false
     private var captureWatchdog: Runnable? = null
     private var settleTimeout: Runnable? = null
 
     @Volatile
     private var videoMode = false
-
-    /** Save-time crop for stills; the preview always uses the native buffer aspect. */
-    @Volatile
-    private var saveCrop: SaveCrop = SaveCrop.RAW
-
-    /** Recording quality chosen in settings; used for the video preview and the encoder. */
-    @Volatile
-    private var preferredVideoQuality: VideoQuality? = null
-    @Volatile
-    private var preferredVideoFps: Int? = null
-
     @Volatile
     private var recording = false
     private var recordingStarting = false
@@ -192,7 +175,6 @@ class CameraController(
                 notifyError("No usable camera lens found")
                 return@post
             }
-            // Keep the user's choices across pause/resume and lens rediscovery.
             val previous = state
             val base = when {
                 previous == null -> CameraState.defaults(lens)
@@ -297,19 +279,6 @@ class CameraController(
                 notifyState()
                 createSession()
             }
-        }
-    }
-
-    /** Chooses how a still is cropped when it is written. The preview never changes. */
-    fun setSaveCrop(crop: SaveCrop) {
-        cameraHandler.post { saveCrop = crop }
-    }
-
-    /** Recording quality restored from preferences before the first session is built. */
-    fun setPreferredVideo(quality: VideoQuality, fps: Int) {
-        cameraHandler.post {
-            preferredVideoQuality = quality
-            preferredVideoFps = fps
         }
     }
 
@@ -476,10 +445,7 @@ class CameraController(
 
     // ---------------------------------------------------------------- video
 
-    /**
-     * Switches between stills and video. Video forces a 16:9 framing so the preview, the sensor
-     * crop and the encoder buffer all show the same thing; the photo aspect is restored on exit.
-     */
+    /** Switches still and video sessions while retaining each stream's native frame ratio. */
     fun setVideoMode(enabled: Boolean) {
         cameraHandler.post {
             if (videoMode == enabled || recording || recorder != null) return@post
@@ -494,6 +460,7 @@ class CameraController(
                 return@post
             }
             videoMode = enabled
+            state = s
             pendingRecording = null
             aeRegion = null
             afRegion = null
@@ -693,15 +660,13 @@ class CameraController(
     }
 
     private fun resolveVideoConfig(lens: LensProfile, requested: VideoConfig? = null): VideoConfig? {
-        val qualities = VideoMath.availableQualities(lens.videoSizes)
-        val quality = (requested?.quality ?: preferredVideoQuality)
-            ?.takeIf { qualities.contains(it) }
+        val qualities = VideoMath.availableQualities(lens.videoSizes, lens.nativeAspect)
+        val quality = requested?.quality?.takeIf { qualities.contains(it) }
             ?: VideoMath.defaultQuality(qualities)
             ?: return null
-        val size = VideoMath.sizeFor(quality, lens.videoSizes) ?: return null
+        val size = VideoMath.sizeFor(quality, lens.videoSizes, lens.nativeAspect) ?: return null
         val fpsOptions = VideoMath.supportedFps(lens.videoFpsRanges)
-        val wantedFps = requested?.fps ?: preferredVideoFps ?: VideoMath.DEFAULT_FPS
-        val fps = VideoMath.fpsFor(wantedFps, fpsOptions)
+        val fps = VideoMath.fpsFor(requested?.fps ?: VideoMath.DEFAULT_FPS, fpsOptions)
         return VideoConfig(quality, size, fps)
     }
 
@@ -802,10 +767,9 @@ class CameraController(
         val st = surfaceTexture ?: return
         val s = state ?: return
 
-        // Photo always previews the native JPEG buffer; the save-time crop is applied later, so
-        // what the user frames never shifts with the chosen output ratio. Video previews the
-        // encoder's aspect even before recording starts, so the framing does not jump on record.
-        val photoPlan = AspectMath.rawPlan(s.lens)
+        // Video keeps the preview on the encoder's aspect even before recording starts, so the
+        // framing does not jump when the user presses record.
+        val photoPlan = AspectMath.planNative(s.lens)
         val plan = if (videoMode) {
             resolveVideoConfig(s.lens)?.let { AspectMath.planForOutput(s.lens, it.size) }
                 ?: photoPlan
@@ -1225,9 +1189,6 @@ class CameraController(
 
         stillSpec = spec
         stillLens = s.lens
-        stillCropAspect = AspectMath.saveCropAspect(saveCrop, screenAspect(), s.lens.sensorOrientation)
-        stillOrientation = orientation
-        stillMirror = s.lens.facing == Facing.FRONT
 
         val timeoutMs = ExposureMath.estimatedCaptureTimeoutMs(spec.exposureNs ?: 0L)
         val watchdog = Runnable {
@@ -1239,7 +1200,7 @@ class CameraController(
 
         try {
             sess.capture(builder.build(), stillCallback, cameraHandler)
-            Log.i(tag, "still capture: iso=${spec.iso} shutter=${spec.exposureNs} strategy=$effectiveStrategy orientation=$orientation crop=$stillCropAspect")
+            Log.i(tag, "still capture: iso=${spec.iso} shutter=${spec.exposureNs} strategy=$effectiveStrategy orientation=$orientation")
         } catch (t: Throwable) {
             Log.e(tag, "capture failed", t)
             failCapture("Capture failed: ${t.message}")
@@ -1402,12 +1363,7 @@ class CameraController(
             // seconds on a busy device, so stop it here; saving reports its own result.
             captureWatchdog?.let { cameraHandler.removeCallbacks(it) }
             captureWatchdog = null
-            saver.save(
-                bytes,
-                cropAspect = stillCropAspect,
-                orientationDegrees = stillOrientation,
-                mirror = stillMirror
-            )
+            saver.save(bytes)
         } catch (t: Throwable) {
             Log.e(tag, "JPEG read failed", t)
             failCapture("Could not read JPEG: ${t.message}")
@@ -1417,12 +1373,6 @@ class CameraController(
     }
 
     // ---------------------------------------------------------------- helpers
-
-    private fun screenAspect(): Float {
-        val metrics = context.resources.displayMetrics
-        if (metrics.heightPixels <= 0) return 9f / 20f
-        return metrics.widthPixels.toFloat() / metrics.heightPixels.toFloat()
-    }
 
     private fun notifyCatalog() {
         val currentFacing = state?.lens?.facing ?: facing

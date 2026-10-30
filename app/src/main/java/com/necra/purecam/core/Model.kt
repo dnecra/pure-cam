@@ -61,17 +61,6 @@ enum class Facing { BACK, FRONT, EXTERNAL }
 /** How a lens is reached. See plan section 3.3. */
 enum class LensMode { DIRECT, PHYSICAL, LOGICAL }
 
-enum class Aspect(val label: String, val ratio: Float) {
-    R4_3("4:3", 4f / 3f),
-    R3_2("3:2", 3f / 2f),
-    R16_9("16:9", 16f / 9f),
-    R1_1("1:1", 1f),
-    R2_1("2:1", 2f),
-    FULL("Full", 0f);
-
-    val isFull: Boolean get() = this == FULL
-}
-
 /** White-balance presets that Camera2 can select directly. CCT is the nominal value used for display. */
 enum class WbPreset(val label: String, val cct: Int) {
     INCANDESCENT("Incandescent", 2856),
@@ -241,6 +230,11 @@ data class LensProfile(
 
     val supportsVideo: Boolean
         get() = videoSizes.isNotEmpty()
+
+    /** Aspect ratio of the largest native still output, falling back to the active sensor area. */
+    val nativeAspect: Float
+        get() = jpegSizes.maxByOrNull { it.area }?.aspect
+            ?: (activeArray.width.toFloat() / activeArray.height)
 
     val hasMultipleNativeZooms: Boolean
         get() = zoomRatioRange != null

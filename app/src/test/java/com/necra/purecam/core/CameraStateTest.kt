@@ -8,7 +8,7 @@ import org.junit.Test
 class CameraStateTest {
 
     @Test
-    fun defaults_areAutoAndFullSensor() {
+    fun defaults_areAutoWithFlashOffAndZoomOne() {
         val lens = TestProfiles.lens()
 
         val state = CameraState.defaults(lens)
