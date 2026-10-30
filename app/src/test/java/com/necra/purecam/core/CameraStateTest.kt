@@ -8,13 +8,12 @@ import org.junit.Test
 class CameraStateTest {
 
     @Test
-    fun defaults_areAutoAndNativeAspect() {
+    fun defaults_areAutoAndFullSensor() {
         val lens = TestProfiles.lens()
 
         val state = CameraState.defaults(lens)
 
         assertEquals(lens, state.lens)
-        assertEquals(Aspect.R4_3, state.aspect)
         assertFalse(state.flash)
         assertEquals(1f, state.zoom, 0f)
         assertEquals(ExposureMode.Auto, state.exposure)

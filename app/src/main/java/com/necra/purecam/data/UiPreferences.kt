@@ -2,8 +2,7 @@ package com.necra.purecam.data
 
 import android.content.Context
 import android.net.Uri
-import com.necra.purecam.core.Aspect
-import com.necra.purecam.core.ExportFormat
+import com.necra.purecam.core.SaveCrop
 import com.necra.purecam.core.VideoMath
 import com.necra.purecam.core.VideoQuality
 import com.necra.purecam.presentation.CaptureMode
@@ -23,15 +22,11 @@ class UiPreferences(context: Context) {
             .getOrDefault(TimerMode.OFF)
         set(value) = prefs.edit().putString(KEY_TIMER, value.name).apply()
 
-    var aspect: Aspect
-        get() = runCatching { Aspect.valueOf(prefs.getString(KEY_ASPECT, null) ?: Aspect.R4_3.name) }
-            .getOrDefault(Aspect.R4_3)
-        set(value) = prefs.edit().putString(KEY_ASPECT, value.name).apply()
-
-    /** Container written for stills. */
-    var exportFormat: ExportFormat
-        get() = ExportFormat.fromName(prefs.getString(KEY_EXPORT_FORMAT, null))
-        set(value) = prefs.edit().putString(KEY_EXPORT_FORMAT, value.name).apply()
+    var saveCrop: SaveCrop
+        get() = runCatching {
+            SaveCrop.valueOf(prefs.getString(KEY_SAVE_CROP, null) ?: SaveCrop.RAW.name)
+        }.getOrDefault(SaveCrop.RAW)
+        set(value) = prefs.edit().putString(KEY_SAVE_CROP, value.name).apply()
 
     var lastPhoto: Uri?
         get() = prefs.getString(KEY_LAST_PHOTO, null)?.let(Uri::parse)
@@ -60,8 +55,7 @@ class UiPreferences(context: Context) {
     private companion object {
         const val KEY_GRID = "grid"
         const val KEY_TIMER = "timer"
-        const val KEY_ASPECT = "aspect"
-        const val KEY_EXPORT_FORMAT = "export_format"
+        const val KEY_SAVE_CROP = "save_crop"
         const val KEY_LAST_PHOTO = "last_photo_uri"
         const val KEY_LAST_MEDIA_VIDEO = "last_media_video"
         const val KEY_MODE = "capture_mode"

@@ -4,10 +4,9 @@ import android.net.Uri
 import com.necra.purecam.LensCatalog
 import com.necra.purecam.core.AspectPlan
 import com.necra.purecam.core.CameraState
-import com.necra.purecam.core.ExportFormat
 import com.necra.purecam.core.Facing
 import com.necra.purecam.core.LensProfile
-import com.necra.purecam.core.SizeI
+import com.necra.purecam.core.SaveCrop
 import com.necra.purecam.core.VideoConfig
 import com.necra.purecam.core.VideoMath
 import com.necra.purecam.core.VideoQuality
@@ -40,16 +39,12 @@ data class CameraUiState(
     val recordingStarting: Boolean = false,
     val videoQuality: VideoQuality = VideoQuality.FHD_1080P,
     val videoFps: Int = VideoMath.DEFAULT_FPS,
-    val exportFormat: ExportFormat = ExportFormat.JPEG,
+    val saveCrop: SaveCrop = SaveCrop.RAW,
     val audioGranted: Boolean = false
 ) {
     val lens: LensProfile? get() = cameraState?.lens
 
     val lenses: List<LensProfile> get() = lens?.let { catalog.lenses(it.facing) }.orEmpty()
-
-    /** Still buffer in use: always the lens's largest JPEG, cropped to the selected ratio. */
-    val photoSize: SizeI?
-        get() = lens?.jpegSizes?.maxByOrNull { it.area }
 
     val facing: Facing? get() = lens?.facing
 
@@ -76,14 +71,6 @@ data class CameraUiState(
             val size = VideoMath.sizeFor(quality, l.videoSizes) ?: return null
             return VideoConfig(quality, size, VideoMath.fpsFor(videoFps, availableVideoFps))
         }
-
-    /** True when at least one control is out of Auto, used to highlight the tune button. */
-    val manualControlsActive: Boolean
-        get() = cameraState?.let { s ->
-            s.exposure !is com.necra.purecam.core.ExposureMode.Auto ||
-                s.focus !is com.necra.purecam.core.FocusMode.Auto ||
-                s.wb !is com.necra.purecam.core.WhiteBalanceMode.Auto
-        } ?: false
 }
 
 enum class TimerMode(val seconds: Int) {

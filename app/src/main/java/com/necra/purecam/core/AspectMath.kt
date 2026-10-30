@@ -22,7 +22,7 @@ object AspectMath {
 
     private const val ASPECT_TOLERANCE = 0.02f
 
-    /** Ratios the UI offers, in cycle order. Every one is produced by cropping the capture. */
+    /** Ratios the aspect maths understands, in cycle order. */
     val CROP_ASPECTS: List<Aspect> = listOf(Aspect.R4_3, Aspect.R16_9, Aspect.R1_1, Aspect.R2_1)
 
     /**
@@ -36,9 +36,9 @@ object AspectMath {
     }
 
     /**
-     * Sizes the preview for the requested ratio. The capture stream always stays on the
-     * largest native JPEG; the requested ratio is applied as a crop of that buffer, so
-     * changing the ratio never has to restart the camera session.
+     * Framing plan for a requested ratio. Production stills use [rawPlan] and apply the selected
+     * ratio at save time with [saveCropAspect]; this helper remains for the aspect maths and its
+     * tests, where the preview follows the requested ratio while the capture stays uncropped.
      */
     fun plan(
         profile: LensProfile,
@@ -47,10 +47,10 @@ object AspectMath {
         maxPreviewWidth: Int = 1920,
         fullscreenAspect: Float? = null
     ): AspectPlan {
-        val target = if (aspect == Aspect.R2_1 && fullscreenAspect != null &&
+        val target = if (aspect.isFull && fullscreenAspect != null &&
             fullscreenAspect.isFinite() && fullscreenAspect > 0.1f
         ) {
-            // The 2:1 option is the fullscreen framing: use the viewfinder card's aspect.
+            // "Full" fills the viewfinder box, whatever ratio that box currently has.
             val safe = fullscreenAspect.coerceIn(0.3f, 3.3f)
             if (profile.sensorOrientation % 180 == 90) 1f / safe else safe
         } else {
@@ -75,6 +75,38 @@ object AspectMath {
             contentAspect = content
         )
     }
+
+    /**
+     * Plan for the untouched still stream: the preview uses the native JPEG aspect and no crop is
+     * applied. Used for the photo viewfinder now that cropping is a save-time option.
+     */
+    fun rawPlan(profile: LensProfile, maxPreviewWidth: Int = 1920): AspectPlan {
+        val jpeg = largestSize(profile.jpegSizes)
+            ?: SizeI(profile.activeArray.width, profile.activeArray.height)
+        val outputAspect = jpeg.aspect
+        val preview = previewSize(profile.previewSizes, outputAspect, maxPreviewWidth) ?: jpeg
+        val display = if (profile.sensorOrientation % 180 == 90) 1f / outputAspect else outputAspect
+        return AspectPlan(
+            targetAspect = outputAspect,
+            outputAspect = outputAspect,
+            jpegSize = jpeg,
+            previewSize = preview,
+            crop = cropRect(profile.activeArray, outputAspect, 1f),
+            displayAspect = display,
+            contentAspect = display
+        )
+    }
+
+    /**
+     * Crop ratio in sensor coordinates for a save option. Fullscreen uses the current display
+     * aspect so the saved frame matches the phone screen. RAW returns 0, meaning "do not crop".
+     */
+    fun saveCropAspect(crop: SaveCrop, screenAspect: Float, sensorOrientation: Int): Float =
+        when (crop) {
+            SaveCrop.RAW -> 0f
+            SaveCrop.R16_9 -> sensorTargetAspect(Aspect.R16_9, screenAspect, sensorOrientation)
+            SaveCrop.FULLSCREEN -> sensorTargetAspect(Aspect.FULL, screenAspect, sensorOrientation)
+        }
 
     /**
      * Plan for a fixed output buffer, such as a video encoder surface. The preview keeps the
@@ -110,11 +142,19 @@ object AspectMath {
      * Size of the JPEG that will actually be written for [plan]: the centre crop in upright
      * orientation, downsampled so the longest edge stays within [MAX_SAVED_EDGE].
      */
-    fun savedSize(plan: AspectPlan, sensorOrientation: Int): SizeI {
-        val w = plan.jpegSize.width
-        val h = plan.jpegSize.height
-        if (w <= 0 || h <= 0) return plan.jpegSize
-        val ratio = plan.targetAspect.coerceIn(0.2f, 5f)
+    fun savedSize(plan: AspectPlan, sensorOrientation: Int): SizeI =
+        savedSize(plan.jpegSize, plan.targetAspect, sensorOrientation)
+
+    /**
+     * Size written for [jpeg] after a centre crop. A non-positive [cropAspect] means the original
+     * bytes are kept, so the result is the full-resolution buffer.
+     */
+    fun savedSize(jpeg: SizeI, cropAspect: Float, sensorOrientation: Int): SizeI {
+        val w = jpeg.width
+        val h = jpeg.height
+        if (w <= 0 || h <= 0) return jpeg
+        if (cropAspect <= 0f) return jpeg
+        val ratio = cropAspect.coerceIn(0.2f, 5f)
         var cropW = w
         var cropH = (w / ratio).roundToInt()
         if (cropH > h) {

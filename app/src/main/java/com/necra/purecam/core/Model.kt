@@ -105,7 +105,6 @@ sealed interface WhiteBalanceMode {
  */
 data class CameraState(
     val lens: LensProfile,
-    val aspect: Aspect,
     val flash: Boolean,
     val zoom: Float,
     val exposure: ExposureMode,
@@ -115,7 +114,6 @@ data class CameraState(
     companion object {
         fun defaults(profile: LensProfile): CameraState = CameraState(
             lens = profile,
-            aspect = Aspect.R4_3,
             flash = false,
             zoom = 1f,
             exposure = ExposureMode.Auto,

@@ -11,15 +11,14 @@ import androidx.lifecycle.viewModelScope
 import com.necra.purecam.CameraController
 import com.necra.purecam.LensCatalog
 import com.necra.purecam.R
-import com.necra.purecam.core.Aspect
 import com.necra.purecam.core.AspectPlan
 import com.necra.purecam.core.CameraState
-import com.necra.purecam.core.ExportFormat
 import com.necra.purecam.core.ExposureMode
 import com.necra.purecam.core.Facing
 import com.necra.purecam.core.FocusMode
 import com.necra.purecam.core.LensMode
 import com.necra.purecam.core.LensProfile
+import com.necra.purecam.core.SaveCrop
 import com.necra.purecam.core.VideoConfig
 import com.necra.purecam.core.VideoMath
 import com.necra.purecam.core.VideoQuality
@@ -35,18 +34,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.math.abs
-import kotlin.math.roundToInt
-
-/** Fixed white-balance cycle order; presets the active lens does not advertise are skipped. */
-private val WB_CYCLE = listOf(
-    WbPreset.DAYLIGHT,
-    WbPreset.CLOUDY_DAYLIGHT,
-    WbPreset.INCANDESCENT,
-    WbPreset.FLUORESCENT,
-    WbPreset.WARM_FLUORESCENT,
-    WbPreset.TWILIGHT,
-    WbPreset.SHADE
-)
 
 /**
  * Owns the camera session and turns user intents into [CameraUiState] snapshots.
@@ -70,6 +57,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
             captureMode = prefs.captureMode,
             videoQuality = prefs.videoQuality,
             videoFps = prefs.videoFps,
+            saveCrop = prefs.saveCrop,
             audioGranted = hasAudioPermission()
         )
     )
@@ -96,8 +84,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         controller = CameraController(getApplication(), textureView, this).also {
             preview = textureView
             // Queued before start(), so restored preferences are honoured from the first session.
-            it.setPreferredAspect(prefs.aspect)
-            it.setExportFormat(prefs.exportFormat)
+            it.setSaveCrop(prefs.saveCrop)
+            it.setPreferredVideo(prefs.videoQuality, prefs.videoFps)
             it.setVideoMode(_uiState.value.videoMode)
             it.setDeviceRotation(_uiState.value.deviceRotation)
         }
@@ -172,6 +160,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         if (!_uiState.value.availableVideoQualities.contains(quality)) return
         prefs.videoQuality = quality
         _uiState.update { it.copy(videoQuality = quality) }
+        controller?.setPreferredVideo(quality, _uiState.value.videoFps)
     }
 
     fun setVideoFps(fps: Int) {
@@ -179,6 +168,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         if (!_uiState.value.availableVideoFps.contains(fps)) return
         prefs.videoFps = fps
         _uiState.update { it.copy(videoFps = fps) }
+        controller?.setPreferredVideo(_uiState.value.videoQuality, fps)
     }
 
     fun toggleFlash() {
@@ -251,47 +241,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         controller?.setZoom(next)
     }
 
-    fun setAspect(aspect: Aspect) {
-        prefs.aspect = aspect
-        _uiState.update { it.copy(cameraState = it.cameraState?.copy(aspect = aspect)) }
-        controller?.setAspect(aspect)
-    }
-
-    /** Chooses the still container; the largest native JPEG is always the source. */
-    fun setExportFormat(format: ExportFormat) {
-        if (_uiState.value.recording || _uiState.value.recordingStarting) return
-        if (_uiState.value.exportFormat == format) return
-        prefs.exportFormat = format
-        _uiState.update { it.copy(exportFormat = format) }
-        controller?.setExportFormat(format)
-    }
-
-    /** Reports the viewfinder card aspect so the 2:1 option can fill it. */
-    fun setFullscreenAspect(aspect: Float) {
-        controller?.setFullscreenAspect(aspect)
-    }
-
-    /**
-     * Cycles Auto → the lens's white-balance presets → Auto. Only presets the lens advertises
-     * are offered, and the order is fixed so repeated taps are predictable.
-     */
-    fun cycleWhiteBalance() {
-        val s = _uiState.value.cameraState ?: return
-        val available = WB_CYCLE.filter { s.lens.awbPresets.contains(it) }
-        if (available.isEmpty()) return
-        val next = when (val current = s.wb) {
-            is WhiteBalanceMode.Auto -> WhiteBalanceMode.Preset(available.first())
-            is WhiteBalanceMode.Preset -> {
-                val index = available.indexOf(current.preset)
-                if (index in 0 until available.lastIndex) {
-                    WhiteBalanceMode.Preset(available[index + 1])
-                } else {
-                    WhiteBalanceMode.Auto
-                }
-            }
-            is WhiteBalanceMode.Kelvin -> WhiteBalanceMode.Auto
-        }
-        controller?.setWhiteBalance(next)
+    fun setSaveCrop(crop: SaveCrop) {
+        prefs.saveCrop = crop
+        _uiState.update { it.copy(saveCrop = crop) }
+        controller?.setSaveCrop(crop)
     }
 
     /** Exposure compensation in EV, applied on top of auto exposure. */
@@ -517,6 +470,5 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         countdownJob?.cancel()
         controller?.shutdown()
         controller = null
-        super.onCleared()
     }
 }

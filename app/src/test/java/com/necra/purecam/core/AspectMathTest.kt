@@ -8,7 +8,7 @@ import org.junit.Test
 class AspectMathTest {
 
     @Test
-    fun cropAspects_areAlwaysOfferedInCycleOrder() {
+    fun cropAspects_areListedInCycleOrder() {
         assertEquals(
             listOf(Aspect.R4_3, Aspect.R16_9, Aspect.R1_1, Aspect.R2_1),
             AspectMath.CROP_ASPECTS
@@ -145,6 +145,36 @@ class AspectMathTest {
     }
 
     @Test
+    fun plan_fullModePrefersTheViewfinderAspect() {
+        val profile = TestProfiles.lens(sensorOrientation = 90)
+
+        val plan = AspectMath.plan(
+            profile,
+            Aspect.FULL,
+            screenAspect = 0.5f,
+            fullscreenAspect = 0.6f
+        )
+
+        assertEquals(1f / 0.6f, plan.targetAspect, 1e-6f)
+        assertEquals(0.6f, plan.displayAspect, 1e-6f)
+    }
+
+    @Test
+    fun plan_twoToOneStaysATrueTwoToOneCrop() {
+        val profile = TestProfiles.lens(sensorOrientation = 90)
+
+        val plan = AspectMath.plan(
+            profile,
+            Aspect.R2_1,
+            screenAspect = 0.5f,
+            fullscreenAspect = 0.6f
+        )
+
+        assertEquals(2f, plan.targetAspect, 1e-6f)
+        assertEquals(0.5f, plan.displayAspect, 1e-6f)
+    }
+
+    @Test
     fun plan_fallsBackToActiveArrayWithoutJpegSizes() {
         val profile = TestProfiles.lens(jpegSizes = emptyList(), previewSizes = emptyList())
 
@@ -164,6 +194,35 @@ class AspectMathTest {
         val plan = AspectMath.plan(profile, Aspect.R16_9, screenAspect = 0.5f)
 
         assertEquals(SizeI(4000, 3000), plan.jpegSize)
+    }
+
+    @Test
+    fun rawPlan_usesNativeJpegAspectAndUprightDisplay() {
+        val profile = TestProfiles.lens(sensorOrientation = 90)
+
+        val plan = AspectMath.rawPlan(profile)
+
+        assertEquals(SizeI(4000, 3000), plan.jpegSize)
+        assertEquals(4f / 3f, plan.targetAspect, 1e-6f)
+        assertEquals(4f / 3f, plan.outputAspect, 1e-6f)
+        assertEquals(3f / 4f, plan.displayAspect, 1e-6f)
+        assertEquals(3f / 4f, plan.contentAspect, 1e-6f)
+    }
+
+    @Test
+    fun saveCropAspect_mapsOptionsToSensorRatio() {
+        assertEquals(0f, AspectMath.saveCropAspect(SaveCrop.RAW, 0.5f, 90), 0f)
+        assertEquals(16f / 9f, AspectMath.saveCropAspect(SaveCrop.R16_9, 0.5f, 90), 1e-6f)
+        assertEquals(2f, AspectMath.saveCropAspect(SaveCrop.FULLSCREEN, 0.5f, 90), 1e-6f)
+        assertEquals(0.5f, AspectMath.saveCropAspect(SaveCrop.FULLSCREEN, 0.5f, 0), 1e-6f)
+    }
+
+    @Test
+    fun savedSize_rawKeepsFullResolutionAndCropShrinks() {
+        val jpeg = SizeI(4000, 3000)
+
+        assertEquals(SizeI(4000, 3000), AspectMath.savedSize(jpeg, 0f, 90))
+        assertEquals(SizeI(2250, 4000), AspectMath.savedSize(jpeg, 16f / 9f, 90))
     }
 
     @Test

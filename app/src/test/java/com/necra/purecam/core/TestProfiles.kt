@@ -120,7 +120,6 @@ object TestProfiles {
         zoom: Float = 1f
     ): CameraState = CameraState(
         lens = profile,
-        aspect = Aspect.R4_3,
         flash = flash,
         zoom = zoom,
         exposure = ExposureMode.Manual(iso, shutterNs),
@@ -135,7 +134,6 @@ object TestProfiles {
         wb: WhiteBalanceMode = WhiteBalanceMode.Auto
     ): CameraState = CameraState(
         lens = profile,
-        aspect = Aspect.R4_3,
         flash = flash,
         zoom = zoom,
         exposure = ExposureMode.Auto,

@@ -14,7 +14,6 @@ import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
 import com.necra.purecam.core.AspectMath
-import com.necra.purecam.core.ExportFormat
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.security.MessageDigest
@@ -29,10 +28,9 @@ import kotlin.math.roundToInt
 /**
  * Writes a captured JPEG to MediaStore.
  *
- * The sensor always streams its largest JPEG. When the selected ratio differs from that
- * buffer the frame is centre-cropped and rotated upright in software. A JPEG capture that
- * already matches the requested ratio is written untouched, EXIF orientation included.
- * HEIC captures are always re-encoded from the same JPEG source.
+ * The camera always streams its largest native JPEG. When the frame needs no crop and no
+ * mirroring the original bytes are stored untouched, EXIF orientation included. Otherwise the
+ * frame is centre-cropped, rotated upright and, for the front camera, mirrored in software.
  */
 class PhotoSaver(
     private val context: Context,
@@ -44,29 +42,29 @@ class PhotoSaver(
     private val closed = AtomicBoolean(false)
 
     /**
-     * @param cropAspect requested ratio in sensor coordinates (width / height). Pass 0 to save
-     *   the camera's bytes untouched.
+     * @param cropAspect requested ratio in sensor coordinates (width / height). Pass 0 to keep
+     *   the camera's full frame.
      * @param orientationDegrees clockwise rotation needed to make the frame upright; used only
-     *   when a crop or a HEIC export forces a decode/re-encode.
-     * @param format container to write. JPEG is byte-identical when no crop is needed.
+     *   when a crop or the mirror forces a decode/re-encode.
+     * @param mirror flips the saved frame horizontally, matching the front-camera preview.
      */
     fun save(
         jpeg: ByteArray,
         cropAspect: Float = 0f,
         orientationDegrees: Int = 0,
-        format: ExportFormat = ExportFormat.JPEG,
+        mirror: Boolean = false,
         timestamp: Long = System.currentTimeMillis()
     ) {
         if (closed.get()) return
         executor.execute {
-            val encoded = encode(jpeg, cropAspect, orientationDegrees, format)
+            val encoded = encode(jpeg, cropAspect, orientationDegrees, mirror)
 
             val resolver = context.contentResolver
             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(timestamp))
-            val name = "IMG_$stamp.${encoded.format.extension}"
+            val name = "IMG_$stamp.jpg"
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, name)
-                put(MediaStore.Images.Media.MIME_TYPE, encoded.format.mimeType)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
                 put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_DCIM}/Camera")
                 put(MediaStore.Images.Media.DATE_TAKEN, timestamp)
                 put(MediaStore.Images.Media.IS_PENDING, 1)
@@ -77,17 +75,17 @@ class PhotoSaver(
                 uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                     ?: throw IOException("MediaStore insert returned null")
                 resolver.openOutputStream(uri)?.use { out ->
-                    out.write(encoded.bytes)
+                    out.write(encoded)
                     out.flush()
                 } ?: throw IOException("Could not open MediaStore output")
                 val done = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
                 resolver.update(uri, done, null, null)
                 Log.i(
                     "PureCam/Save",
-                    "saved $name ${encoded.bytes.size} bytes (capture ${jpeg.size}) " +
-                        "sha256=${sha256(encoded.bytes).take(16)}"
+                    "saved $name ${encoded.size} bytes (capture ${jpeg.size}) " +
+                        "sha256=${sha256(encoded).take(16)}"
                 )
-                mainHandler.post { onSaved(uri, encoded.bytes.size) }
+                mainHandler.post { onSaved(uri, encoded.size) }
             } catch (t: Throwable) {
                 Log.e("PureCam/Save", "save failed", t)
                 if (uri != null) {
@@ -102,27 +100,23 @@ class PhotoSaver(
         if (closed.compareAndSet(false, true)) executor.shutdown()
     }
 
-    private data class Encoded(val bytes: ByteArray, val format: ExportFormat)
-
     /**
-     * Returns the bytes to write. JPEG captures that need no crop keep the camera's original
-     * bytes; everything else is decoded once, cropped, rotated and re-compressed.
+     * Returns the bytes to write. A capture that needs no crop and no mirror keeps the camera's
+     * original bytes; everything else is decoded once, cropped, rotated and re-compressed.
      */
     private fun encode(
         jpeg: ByteArray,
         cropAspect: Float,
         orientationDegrees: Int,
-        format: ExportFormat
-    ): Encoded {
-        if (format == ExportFormat.JPEG && !needsCrop(jpeg, cropAspect)) {
-            return Encoded(jpeg, ExportFormat.JPEG)
-        }
+        mirror: Boolean
+    ): ByteArray {
+        if (!mirror && !needsCrop(jpeg, cropAspect)) return jpeg
         return try {
-            transcode(jpeg, cropAspect, orientationDegrees, format)
+            transcode(jpeg, cropAspect, orientationDegrees, mirror) ?: jpeg
         } catch (t: Throwable) {
             // Never lose the photo because the conversion failed.
             Log.w("PureCam/Save", "encode failed; saving the full frame as JPEG", t)
-            Encoded(jpeg, ExportFormat.JPEG)
+            jpeg
         }
     }
 
@@ -140,14 +134,13 @@ class PhotoSaver(
         jpeg: ByteArray,
         cropAspect: Float,
         orientationDegrees: Int,
-        format: ExportFormat
-    ): Encoded {
-        val decoder = BitmapRegionDecoder.newInstance(jpeg, 0, jpeg.size, false)
-            ?: return Encoded(jpeg, ExportFormat.JPEG)
+        mirror: Boolean
+    ): ByteArray? {
+        val decoder = BitmapRegionDecoder.newInstance(jpeg, 0, jpeg.size, false) ?: return null
         try {
             val width = decoder.width
             val height = decoder.height
-            if (width <= 0 || height <= 0) return Encoded(jpeg, ExportFormat.JPEG)
+            if (width <= 0 || height <= 0) return null
 
             var cropWidth = width
             var cropHeight = height
@@ -174,26 +167,21 @@ class PhotoSaver(
             val region = decoder.decodeRegion(
                 Rect(left, top, left + cropWidth, top + cropHeight),
                 options
-            ) ?: return Encoded(jpeg, ExportFormat.JPEG)
+            ) ?: return null
 
-            val upright = if (orientationDegrees % 360 == 0) {
+            val rotation = orientationDegrees % 360
+            val needsTransform = rotation != 0 || mirror
+            val upright = if (!needsTransform) {
                 region
             } else {
-                val matrix = Matrix().apply { postRotate(orientationDegrees.toFloat()) }
+                val matrix = Matrix().apply {
+                    if (rotation != 0) postRotate(rotation.toFloat())
+                    if (mirror) postScale(-1f, 1f)
+                }
                 Bitmap.createBitmap(region, 0, 0, region.width, region.height, matrix, true)
             }
             try {
-                if (format == ExportFormat.HEIC) {
-                    HeicEncoder.encode(upright, context.cacheDir)?.let {
-                        return Encoded(it, ExportFormat.HEIC)
-                    }
-                    // The device cannot encode HEIF: fall back to JPEG rather than failing.
-                    Log.w("PureCam/Save", "HEIC encode unavailable; writing JPEG instead")
-                }
-                compress(upright, Bitmap.CompressFormat.JPEG)?.let {
-                    return Encoded(it, ExportFormat.JPEG)
-                }
-                return Encoded(jpeg, ExportFormat.JPEG)
+                return compress(upright)
             } finally {
                 if (upright !== region) upright.recycle()
                 region.recycle()
@@ -203,10 +191,10 @@ class PhotoSaver(
         }
     }
 
-    private fun compress(bitmap: Bitmap, format: Bitmap.CompressFormat): ByteArray? {
+    private fun compress(bitmap: Bitmap): ByteArray? {
         val out = ByteArrayOutputStream()
         return runCatching {
-            if (bitmap.compress(format, JPEG_QUALITY, out)) out.toByteArray() else null
+            if (bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)) out.toByteArray() else null
         }.getOrNull()
     }
 
