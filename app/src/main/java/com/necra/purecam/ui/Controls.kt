@@ -264,12 +264,12 @@ fun RecordingPill(modifier: Modifier = Modifier) {
     Surface(
         shape = CircleShape,
         color = Color.Black.copy(alpha = 0.45f),
-        modifier = modifier.height(40.dp)
+        modifier = modifier.height(34.dp)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             val pulse = rememberInfiniteTransition(label = "recordingPulse")
             val dotAlpha by pulse.animateFloat(
@@ -281,7 +281,7 @@ fun RecordingPill(modifier: Modifier = Modifier) {
                 ),
                 label = "recordingDot"
             )
-            Canvas(modifier = Modifier.size(9.dp)) {
+            Canvas(modifier = Modifier.size(7.dp)) {
                 drawCircle(
                     Color(0xFFFF5252).copy(alpha = dotAlpha),
                     radius = size.minDimension / 2f,
@@ -290,7 +290,7 @@ fun RecordingPill(modifier: Modifier = Modifier) {
             }
             Text(
                 text = com.necra.purecam.core.VideoMath.formatDuration(elapsedMs),
-                style = MaterialTheme.typography.labelLarge,
+                style = MaterialTheme.typography.labelMedium,
                 color = Color.White
             )
         }

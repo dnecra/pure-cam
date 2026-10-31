@@ -22,10 +22,7 @@ enum class CaptureMode { PHOTO, VIDEO }
  * lens/session changes.
  */
 data class PreviewState(
-    val facing: Facing? = null,
-    val plan: AspectPlan? = null,
-    val sensorOrientation: Int = 0,
-    val deviceRotation: Int = 0
+    val facing: Facing? = null
 )
 
 /**

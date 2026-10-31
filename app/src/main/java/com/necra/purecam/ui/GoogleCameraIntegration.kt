@@ -67,8 +67,7 @@ fun GoogleCameraScreen(
     // recomposing when unrelated controls change.
     val previewState by viewModel.previewState.collectAsStateWithLifecycle(
         initialValue = com.necra.purecam.presentation.PreviewState(
-            facing = state.facing,
-            plan = state.plan
+            facing = null
         )
     )
 

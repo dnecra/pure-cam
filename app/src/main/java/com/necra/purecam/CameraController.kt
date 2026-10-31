@@ -63,6 +63,7 @@ class CameraController(
             plan: AspectPlan?,
             strategy: LensMode
         )
+        fun onPreviewReady(facing: Facing)
         fun onCaptureStarted(exposureNs: Long?)
         fun onCaptureFinished(uri: Uri?, error: String?)
         fun onPhotoSaved(uri: Uri?, error: String?)
@@ -118,6 +119,7 @@ class CameraController(
     private var reader: ImageReader? = null
     private var device: CameraDevice? = null
     private var session: CameraCaptureSession? = null
+    private var previewReadySession: CameraCaptureSession? = null
 
     private var generation = 0
     private var sessionToken = 0
@@ -1284,6 +1286,11 @@ class CameraController(
             result: TotalCaptureResult
         ) {
             handleResult(result)
+            if (session === this@CameraController.session && session !== previewReadySession) {
+                previewReadySession = session
+                val facing = state?.lens?.facing ?: return
+                mainHandler.post { listener.onPreviewReady(facing) }
+            }
         }
 
         override fun onCaptureFailed(

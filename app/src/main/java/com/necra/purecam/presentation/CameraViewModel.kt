@@ -78,6 +78,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         )
     )
     val uiState = _uiState.asStateFlow()
+    private val _previewFacing = MutableStateFlow<Facing?>(null)
 
     /**
      * Minimal state consumed by the live preview surface. Extracted into its own flow so that
@@ -85,15 +86,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
      * the [TextureView] to recompose — it only reacts to lens/session changes that actually
      * alter the framing.
      */
-    val previewState = _uiState
-        .map {
-            PreviewState(
-                facing = it.facing,
-                plan = it.plan,
-                sensorOrientation = it.lens?.sensorOrientation ?: 0,
-                deviceRotation = it.deviceRotation
-            )
-        }
+    val previewState = _previewFacing
+        .map { PreviewState(facing = it) }
         .distinctUntilChanged()
 
     private val _signals = MutableSharedFlow<CameraSignal>(extraBufferCapacity = 16)
@@ -114,6 +108,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     /** Called from the AndroidView factory. Re-attaches cleanly after activity recreation. */
     fun attachPreview(previewView: TextureView) {
         if (preview === previewView && controller != null) return
+        _previewFacing.value = null
         controller?.shutdown()
         restoredWbCameraId = null
         controller = CameraController(getApplication(), previewView, this).also {
@@ -131,6 +126,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     }
 
     fun onPreviewSurfaceDestroyed(surfaceTexture: SurfaceTexture) {
+        _previewFacing.value = null
         controller?.onSurfaceDestroyed(surfaceTexture)
     }
 
@@ -144,6 +140,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         resumed = false
         cancelCountdown()
         controller?.stop()
+        _previewFacing.value = null
         _uiState.update { it.copy(recording = false, recordingStarting = false) }
     }
 
@@ -479,6 +476,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         _uiState.update {
             it.copy(ready = true, cameraState = state, plan = plan, zoom = state.zoom)
         }
+    }
+
+    override fun onPreviewReady(facing: Facing) {
+        if (resumed) _previewFacing.value = facing
     }
 
     override fun onCaptureStarted(exposureNs: Long?) {

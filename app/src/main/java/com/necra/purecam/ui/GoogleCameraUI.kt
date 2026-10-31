@@ -224,7 +224,9 @@ fun GoogleCameraUI(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 12.dp),
+                            // The card is inset 10 dp; 14 more aligns these controls to the
+                            // settings/WB buttons' 24 dp screen guides.
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         AnimatedVisibility(
@@ -239,8 +241,8 @@ fun GoogleCameraUI(
                                 enabled = !busy,
                                 onSelect = onSelectLens
                             )
-                            Spacer(Modifier.height(10.dp))
                         }
+                        if (lenses.size > 1) Spacer(Modifier.height(18.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
@@ -310,7 +312,7 @@ private fun CircleIconButton(
     )
     Box(
         modifier = Modifier
-            .size(40.dp)
+            .size(36.dp)
             .clip(CircleShape)
             .background(background)
             .hapticClickable(enabled = enabled, onClick = onClick),
@@ -320,7 +322,7 @@ private fun CircleIconButton(
             painter = painterResource(icon),
             contentDescription = description,
             tint = tint,
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier.size(20.dp)
         )
     }
 }
@@ -334,7 +336,7 @@ private fun TimerButton(timer: TimerMode, onClick: () -> Unit) {
     }
     Box(
         modifier = Modifier
-            .size(40.dp)
+            .size(36.dp)
             .clip(CircleShape)
             .background(if (label == null) CamScrim else CamAccent)
             .hapticClickable(onClick = onClick),
@@ -345,13 +347,13 @@ private fun TimerButton(timer: TimerMode, onClick: () -> Unit) {
                 painter = painterResource(R.drawable.ic_timer),
                 contentDescription = stringResource(R.string.timer),
                 tint = CamWhite,
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(20.dp)
             )
         } else {
             Text(
                 text = label,
                 color = CamOnAccent,
-                fontSize = 13.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Bold
             )
         }
@@ -408,8 +410,8 @@ private fun SpecPill(text: String?, onClick: () -> Unit) {
     ) { value ->
         Box(
             modifier = Modifier
-                .width(140.dp)
-                .height(40.dp)
+                .width(124.dp)
+                .height(36.dp)
                 .clip(CircleShape)
                 .background(if (value != null) CamScrim else Color.Transparent)
                 .hapticClickable(enabled = value != null, onClick = onClick)
@@ -420,7 +422,7 @@ private fun SpecPill(text: String?, onClick: () -> Unit) {
                 Text(
                     text = value,
                     color = CamWhite.copy(alpha = 0.92f),
-                    style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp),
+                    style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -467,11 +469,11 @@ private fun LensSegmented(
 ) {
     Surface(
         shape = RoundedCornerShape(20.dp),
-        color = CamBarBtn.copy(alpha = 0.75f)
+        color = CamBarBtn.copy(alpha = 0.25f)
     ) {
         Row(
             modifier = Modifier
-                .height(40.dp)
+                .height(36.dp)
                 .padding(3.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -493,9 +495,9 @@ private fun LensSegmented(
                 )
                 Box(
                     modifier = Modifier
-                        .height(34.dp)
-                        .widthIn(min = 52.dp)
-                        .clip(RoundedCornerShape(17.dp))
+                        .height(30.dp)
+                        .widthIn(min = 48.dp)
+                        .clip(RoundedCornerShape(15.dp))
                         .background(background)
                         .hapticClickable(enabled = enabled) { onSelect(lens) }
                         .padding(horizontal = 12.dp),
