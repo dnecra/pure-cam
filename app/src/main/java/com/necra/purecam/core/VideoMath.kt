@@ -30,7 +30,7 @@ data class VideoConfig(
 object VideoMath {
 
     val CANDIDATE_FPS = listOf(24, 30, 60)
-    const val DEFAULT_FPS = 30
+    const val DEFAULT_FPS = 60
 
     /** MediaRecorder needs a few frames before the MP4 header is valid. */
     const val MIN_RECORDING_MS = 500L
@@ -100,6 +100,16 @@ object VideoMath {
         if (ranges.isEmpty()) return null
         ranges.firstOrNull { it.first == fps && it.last == fps }?.let { return it }
         return ranges.filter { fps in it }.minByOrNull { it.last - it.first }
+    }
+
+    /**
+     * Highest advertised preview rate. Prefer an exact fixed range when available; otherwise
+     * retain the camera's advertised variable range so it can adapt in dim scenes.
+     */
+    fun previewAeRange(ranges: List<IntRange>): IntRange? {
+        val maxFps = ranges.maxOfOrNull { it.last } ?: return null
+        ranges.firstOrNull { it.first == maxFps && it.last == maxFps }?.let { return it }
+        return ranges.filter { it.last == maxFps }.minByOrNull { it.first }
     }
 
     fun fpsFor(requested: Int, supported: List<Int>): Int {

@@ -2,8 +2,11 @@ package com.necra.purecam.data
 
 import android.content.Context
 import android.net.Uri
+import com.necra.purecam.core.CaptureAspectMode
 import com.necra.purecam.core.VideoMath
 import com.necra.purecam.core.VideoQuality
+import com.necra.purecam.core.WbPreset
+import com.necra.purecam.core.WhiteBalanceMode
 import com.necra.purecam.presentation.CaptureMode
 import com.necra.purecam.presentation.TimerMode
 
@@ -45,6 +48,39 @@ class UiPreferences(context: Context) {
         get() = prefs.getInt(KEY_VIDEO_FPS, VideoMath.DEFAULT_FPS)
         set(value) = prefs.edit().putInt(KEY_VIDEO_FPS, value).apply()
 
+    var aspectMode: CaptureAspectMode
+        get() = runCatching {
+            CaptureAspectMode.valueOf(
+                prefs.getString(KEY_ASPECT_MODE, CaptureAspectMode.PORTRAIT_9_16.name)
+                    ?: CaptureAspectMode.PORTRAIT_9_16.name
+            )
+        }.getOrDefault(CaptureAspectMode.PORTRAIT_9_16)
+        set(value) = prefs.edit().putString(KEY_ASPECT_MODE, value.name).apply()
+
+    var whiteBalance: WhiteBalanceMode
+        get() = when (prefs.getString(KEY_WB_MODE, null)) {
+            WB_PRESET -> runCatching {
+                WhiteBalanceMode.Preset(
+                    WbPreset.valueOf(prefs.getString(KEY_WB_PRESET, WbPreset.DAYLIGHT.name)!!)
+                )
+            }.getOrDefault(WhiteBalanceMode.Auto)
+            WB_KELVIN -> WhiteBalanceMode.Kelvin(prefs.getInt(KEY_WB_KELVIN, 5200))
+            else -> WhiteBalanceMode.Auto
+        }
+        set(value) {
+            val edit = prefs.edit()
+            when (value) {
+                WhiteBalanceMode.Auto -> edit.putString(KEY_WB_MODE, WB_AUTO)
+                is WhiteBalanceMode.Preset -> edit
+                    .putString(KEY_WB_MODE, WB_PRESET)
+                    .putString(KEY_WB_PRESET, value.preset.name)
+                is WhiteBalanceMode.Kelvin -> edit
+                    .putString(KEY_WB_MODE, WB_KELVIN)
+                    .putInt(KEY_WB_KELVIN, value.kelvin)
+            }
+            edit.apply()
+        }
+
     private companion object {
         const val KEY_GRID = "grid"
         const val KEY_TIMER = "timer"
@@ -53,5 +89,12 @@ class UiPreferences(context: Context) {
         const val KEY_MODE = "capture_mode"
         const val KEY_VIDEO_QUALITY = "video_quality"
         const val KEY_VIDEO_FPS = "video_fps"
+        const val KEY_ASPECT_MODE = "capture_aspect_mode"
+        const val KEY_WB_MODE = "white_balance_mode"
+        const val KEY_WB_PRESET = "white_balance_preset"
+        const val KEY_WB_KELVIN = "white_balance_kelvin"
+        const val WB_AUTO = "auto"
+        const val WB_PRESET = "preset"
+        const val WB_KELVIN = "kelvin"
     }
 }

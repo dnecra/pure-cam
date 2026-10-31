@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -64,6 +65,7 @@ import com.necra.purecam.presentation.CaptureMode
 import com.necra.purecam.presentation.TimerMode
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import kotlin.math.abs
 
 // Google Camera (Pixel) UI colours, taken from new-activity_camera.xml.
 private val CamBg = Color(0xFF000000)
@@ -78,7 +80,7 @@ private val CamMuted = Color(0xFF8E8E93)
  * Pixel-style camera layout: rounded viewfinder card, floating scrim controls and a bottom bar.
  * Everything is driven by [state] so the screen stays stateless.
  *
- * The preview frame fits the camera stream's native aspect ratio.
+ * The preview frame follows the selected capture aspect ratio.
  *
  * @param content the live preview, drawn inside a frame matching the camera stream.
  */
@@ -106,7 +108,7 @@ fun GoogleCameraUI(
         if (lens.facing == Facing.BACK) Facing.FRONT else Facing.BACK
     ).isNotEmpty()
     val whiteBalanceActive = state.cameraState?.wb !is WhiteBalanceMode.Auto
-    val frameAspect = state.plan?.displayAspect ?: (4f / 3f)
+    val frameAspect = state.plan?.displayAspect ?: (9f / 16f)
 
     // A WB change is announced for two seconds, then the pill falls back to the live spec.
     val wbSpec = whiteBalanceLabel(state.cameraState?.wb)
@@ -132,11 +134,11 @@ fun GoogleCameraUI(
                 .fillMaxSize()
                 .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 88.dp)
         ) {
-            // Plain black card. The preview is clipped by its native-ratio window, so no extra
+            // Plain black card. The preview is clipped by its selected-ratio window, so no extra
             // rounded Surface layer wraps the whole viewfinder (one less layer per frame).
             Box(modifier = Modifier.fillMaxSize().background(CamBg)) {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    // Native-ratio preview, fitted inside the viewfinder space.
+                    // Selected-ratio preview, fitted inside the viewfinder space.
                     ViewfinderFrame(
                         aspect = frameAspect,
                         modifier = Modifier.align(Alignment.Center)
@@ -363,17 +365,36 @@ private fun whiteBalanceLabel(wb: WhiteBalanceMode?): String? = when (wb) {
     else -> null
 }
 
-/** The steady-state status: the photo crop size or the video quality/frame rate. */
+/** The steady-state status: the photo aspect ratio or video quality/frame rate. */
 private fun defaultSpec(state: CameraUiState): String? = if (state.videoMode) {
     state.videoConfig?.let { "${it.quality.label} · ${it.fps} fps" }
 } else {
-    state.plan?.let { plan ->
-        val rotated = state.lens?.sensorOrientation?.rem(180) == 90
-        val width = if (rotated) plan.jpegSize.height else plan.jpegSize.width
-        val height = if (rotated) plan.jpegSize.width else plan.jpegSize.height
-        "JPG · ${width}×${height}"
-    }
+    state.plan?.let { "JPG · ${aspectRatioLabel(it.displayAspect)}" }
 }
+
+private fun aspectRatioLabel(aspect: Float): String {
+    val standard = listOf(
+        "9:16" to (9f / 16f),
+        "2:3" to (2f / 3f),
+        "3:4" to (3f / 4f),
+        "1:1" to 1f,
+        "4:3" to (4f / 3f),
+        "3:2" to (3f / 2f),
+        "16:9" to (16f / 9f),
+        "21:9" to (21f / 9f)
+    )
+    standard.minByOrNull { abs(it.second - aspect) }
+        ?.takeIf { abs(it.second - aspect) < 0.015f }
+        ?.let { return it.first }
+
+    val denominator = 100
+    val numerator = (aspect * denominator).roundToInt().coerceAtLeast(1)
+    val divisor = greatestCommonDivisor(numerator, denominator)
+    return "${numerator / divisor}:${denominator / divisor}"
+}
+
+private tailrec fun greatestCommonDivisor(a: Int, b: Int): Int =
+    if (b == 0) a else greatestCommonDivisor(b, a % b)
 /**
  * Fixed-width status pill. The width never changes, so the top row stays put while the label
  * cross-fades between the WB preset and the live spec.
@@ -387,8 +408,8 @@ private fun SpecPill(text: String?, onClick: () -> Unit) {
     ) { value ->
         Box(
             modifier = Modifier
-                .width(124.dp)
-                .height(34.dp)
+                .width(140.dp)
+                .height(40.dp)
                 .clip(CircleShape)
                 .background(if (value != null) CamScrim else Color.Transparent)
                 .hapticClickable(enabled = value != null, onClick = onClick)
@@ -399,8 +420,7 @@ private fun SpecPill(text: String?, onClick: () -> Unit) {
                 Text(
                     text = value,
                     color = CamWhite.copy(alpha = 0.92f),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
+                    style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -410,7 +430,7 @@ private fun SpecPill(text: String?, onClick: () -> Unit) {
 }
 
 /**
- * Centred preview window that preserves the camera stream's native ratio.
+ * Centred preview window that follows the selected capture ratio.
  */
 @Composable
 private fun ViewfinderFrame(
@@ -447,7 +467,7 @@ private fun LensSegmented(
 ) {
     Surface(
         shape = RoundedCornerShape(20.dp),
-        color = CamBarBtn
+        color = CamBarBtn.copy(alpha = 0.75f)
     ) {
         Row(
             modifier = Modifier
@@ -583,8 +603,8 @@ private fun SegmentedControl(
     ) {
         Row(
             modifier = Modifier
-                .height(48.dp)
-                .padding(4.dp),
+                .height(40.dp)
+                .padding(3.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             SegmentButton(
@@ -638,7 +658,7 @@ private fun SegmentButton(
         shape = shape,
         color = backgroundColor,
         modifier = Modifier
-            .size(width = 58.dp, height = 40.dp)
+            .size(width = 46.dp, height = 34.dp)
             .graphicsLayer { scaleX = selectedScale; scaleY = selectedScale }
             // Clip before the ripple so the pressed indication follows the pill, not a box.
             .clip(shape)
@@ -652,7 +672,7 @@ private fun SegmentButton(
                 painter = painterResource(icon),
                 contentDescription = description,
                 tint = iconTint,
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(20.dp)
             )
         }
     }

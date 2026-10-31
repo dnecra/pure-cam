@@ -1,9 +1,8 @@
 package com.necra.purecam.ui
 
 import android.content.Context
-import android.graphics.Matrix
-import android.view.SurfaceHolder
-import android.view.SurfaceView
+import android.graphics.SurfaceTexture
+import android.view.TextureView
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -41,7 +40,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -51,20 +49,7 @@ import com.necra.purecam.presentation.PreviewState
 import com.necra.purecam.presentation.CameraViewModel
 import kotlin.math.roundToInt
 
-/**
- * SurfaceView hosted in Compose. SurfaceView gets a dedicated hardware overlay layer, so
- * SurfaceFlinger composites the camera frames directly with zero extra copies — unlike
- * TextureView, which forces a full buffer copy on every frame.
- *
- * The transform matrix is recomputed whenever the view size changes so the sensor image stays
- * upright, centre-cropped and undistorted. The front-camera mirror is applied on-screen only;
- * the saved JPEG is never mirrored.
- *
- * NOTE: SurfaceView does not support arbitrary 2D transforms via setTransform(). Centre-crop
- * framing is handled by sizing the SurfaceView itself so that its aspect ratio matches the
- * camera stream: Compose's AndroidView fills the available space and the ViewfinderFrame layout
- * already clips to the correct native ratio, so no Matrix is needed here.
- */
+/** TextureView supplies the sensor-oriented image; the matching stream ratio prevents stretching. */
 @Composable
 internal fun CameraPreview(
     state: PreviewState,
@@ -73,11 +58,10 @@ internal fun CameraPreview(
 ) {
     val density = LocalDensity.current
     val focusRingSize = with(density) { 76.dp.toPx() }
+    val mirrored = state.facing == Facing.FRONT
 
     var focusPoint by remember { mutableStateOf<Offset?>(null) }
     var focusPulse by remember { mutableIntStateOf(0) }
-
-    val mirrored = state.facing == Facing.FRONT
 
     Box(
         modifier = Modifier
@@ -101,29 +85,29 @@ internal fun CameraPreview(
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
-                PreviewSurfaceView(context).apply {
-                    this.mirrored = mirrored
-                    holder.addCallback(object : SurfaceHolder.Callback {
-                        override fun surfaceCreated(holder: SurfaceHolder) {
-                            viewModel.onPreviewSurfaceAvailable()
-                        }
-
-                        override fun surfaceChanged(
-                            holder: SurfaceHolder,
-                            format: Int,
-                            width: Int,
-                            height: Int
-                        ) = Unit
-
-                        override fun surfaceDestroyed(holder: SurfaceHolder) {
-                            viewModel.onPreviewSurfaceDestroyed()
-                        }
-                    })
+                PreviewTextureView(context).apply {
                     viewModel.attachPreview(this)
+                    surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                        override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+                            configurePreview(mirrored)
+                            viewModel.onPreviewSurfaceAvailable(surface)
+                        }
+
+                        override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+                            configurePreview(mirrored)
+                        }
+
+                        override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                            viewModel.onPreviewSurfaceDestroyed(surface)
+                            return false
+                        }
+
+                        override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
+                    }
                 }
             },
             update = { view ->
-                view.mirrored = mirrored
+                view.configurePreview(mirrored)
             }
         )
 
@@ -132,19 +116,15 @@ internal fun CameraPreview(
     }
 }
 
-/**
- * A [SurfaceView] that optionally mirrors itself horizontally for the front camera.
- * SurfaceView lives in its own z-ordered window and is composited by SurfaceFlinger in
- * hardware, bypassing the GPU composition path that TextureView forces.
- */
-private class PreviewSurfaceView(context: Context) : SurfaceView(context) {
-
-    var mirrored: Boolean = false
-        set(value) {
-            if (field == value) return
-            field = value
-            scaleX = if (value) -1f else 1f
-        }
+/** Keeps the camera-provided sensor rotation and mirrors the front preview like a selfie view. */
+private class PreviewTextureView(context: Context) : TextureView(context) {
+    fun configurePreview(mirror: Boolean) {
+        // TextureView already applies SENSOR_ORIENTATION through its SurfaceTexture matrix.
+        // Re-applying that rotation here moved the preview outside its frame.
+        setTransform(null)
+        scaleX = if (mirror) -1f else 1f
+        scaleY = 1f
+    }
 }
 
 @Composable

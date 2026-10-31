@@ -3,6 +3,8 @@ package com.necra.purecam.presentation
 import android.net.Uri
 import com.necra.purecam.LensCatalog
 import com.necra.purecam.core.AspectPlan
+import com.necra.purecam.core.AspectMath
+import com.necra.purecam.core.CaptureAspectMode
 import com.necra.purecam.core.CameraState
 import com.necra.purecam.core.Facing
 import com.necra.purecam.core.LensProfile
@@ -21,7 +23,9 @@ enum class CaptureMode { PHOTO, VIDEO }
  */
 data class PreviewState(
     val facing: Facing? = null,
-    val plan: AspectPlan? = null
+    val plan: AspectPlan? = null,
+    val sensorOrientation: Int = 0,
+    val deviceRotation: Int = 0
 )
 
 /**
@@ -50,15 +54,16 @@ data class CameraUiState(
     val recordingStarting: Boolean = false,
     val videoQuality: VideoQuality = VideoQuality.FHD_1080P,
     val videoFps: Int = VideoMath.DEFAULT_FPS,
+    val aspectMode: CaptureAspectMode = CaptureAspectMode.PORTRAIT_9_16,
     val audioGranted: Boolean = false
 ) {
     val lens: LensProfile? get() = cameraState?.lens
 
     val lenses: List<LensProfile> get() = lens?.let { catalog.lenses(it.facing) }.orEmpty()
 
-    /** Still buffer in use: always the lens's largest JPEG, cropped to the selected ratio. */
+    /** JPEG stream selected for the current capture aspect. */
     val photoSize: SizeI?
-        get() = lens?.jpegSizes?.maxByOrNull { it.area }
+        get() = plan?.jpegSize
 
     val facing: Facing? get() = lens?.facing
 
@@ -69,7 +74,7 @@ data class CameraUiState(
     val availableVideoQualities: List<VideoQuality>
         get() {
             val l = lens ?: return emptyList()
-            return VideoMath.availableQualities(l.videoSizes, l.nativeAspect)
+            return VideoMath.availableQualities(l.videoSizes, AspectMath.videoOutputAspect(l, aspectMode))
         }
 
     val availableVideoFps: List<Int>
@@ -79,13 +84,14 @@ data class CameraUiState(
     val videoConfig: VideoConfig?
         get() {
             val l = lens ?: return null
+            val preferredAspect = AspectMath.videoOutputAspect(l, aspectMode)
             val qualities = availableVideoQualities
             val quality = if (videoQuality in qualities) {
                 videoQuality
             } else {
                 VideoMath.defaultQuality(qualities) ?: return null
             }
-            val size = VideoMath.sizeFor(quality, l.videoSizes, l.nativeAspect) ?: return null
+            val size = VideoMath.sizeFor(quality, l.videoSizes, preferredAspect) ?: return null
             return VideoConfig(quality, size, VideoMath.fpsFor(videoFps, availableVideoFps))
         }
 

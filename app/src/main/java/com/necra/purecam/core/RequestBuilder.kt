@@ -67,7 +67,8 @@ object RequestBuilder {
      * @param fallbackTransform last COLOR_CORRECTION_TRANSFORM seen from auto AWB.
      * @param videoFps recording frame rate; required for [CaptureIntent.RECORD] so the sensor
      *   runs at exactly that rate and manual exposure is shortened to fit one frame.
-     * @param videoFpsRange exact AE target range advertised by the camera, when available.
+     * @param videoFpsRange AE target range advertised by the camera, when available. Preview
+     *   uses it to request the chosen video rate or the fastest safe photo-preview range.
      * @param videoMode true while the screen is in video mode; the flash becomes a steady torch.
      */
     fun build(
@@ -184,9 +185,9 @@ object RequestBuilder {
             flashSingle = !preview && !record && useManual && flashOn,
             torch = flashOn && (record || (preview && videoMode)),
             aeFps = when {
-                !record -> null
                 videoFpsRange != null -> videoFpsRange
-                else -> RangeI(fps, fps)
+                record -> RangeI(fps, fps)
+                else -> null
             },
             afMode = af,
             focusDistance = focusDistance,

@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -196,7 +197,7 @@ internal fun PhotoThumbnail(
     val thumbnail by produceState<ImageBitmap?>(initialValue = null, uri) {
         value = withContext(Dispatchers.IO) { loadThumbnail(context, uri, 120) }
     }
-    val shape = RoundedCornerShape(16.dp)
+    val shape = CircleShape
     Box(
         modifier = Modifier
             .size(48.dp)
@@ -260,7 +261,11 @@ fun RecordingPill(modifier: Modifier = Modifier) {
             delay(250)
         }
     }
-    Surface(shape = CircleShape, color = Color.Black.copy(alpha = 0.45f), modifier = modifier) {
+    Surface(
+        shape = CircleShape,
+        color = Color.Black.copy(alpha = 0.45f),
+        modifier = modifier.height(40.dp)
+    ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,

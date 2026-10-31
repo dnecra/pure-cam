@@ -25,7 +25,16 @@ android {
             )
         }
         debug {
-            isMinifyEnabled = false
+            // Keep the familiar, debug-signed APK installable while applying R8 shrinking.
+            // R8 optimization is disabled when debuggable is true, so this compact variant
+            // cannot attach a debugger; release keeps the same shrink settings.
+            isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 

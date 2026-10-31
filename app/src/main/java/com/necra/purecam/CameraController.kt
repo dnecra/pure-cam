@@ -21,11 +21,13 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
-import android.view.SurfaceView
+import android.graphics.SurfaceTexture
+import android.view.TextureView
 import com.necra.purecam.core.AspectMath
 import com.necra.purecam.core.AspectPlan
 import com.necra.purecam.core.CameraState
 import com.necra.purecam.core.CaptureIntent
+import com.necra.purecam.core.CaptureAspectMode
 import com.necra.purecam.core.ExposureMath
 import com.necra.purecam.core.ExposureMode
 import com.necra.purecam.core.Facing
@@ -46,10 +48,12 @@ import kotlin.math.roundToInt
 
 /** How often the manual-control readout is sampled while the preview runs. */
 private const val READOUT_INTERVAL_MS = 200L
+/** Coalesce pinch updates at up to 120 Hz without rebuilding requests for every pointer event. */
+private const val ZOOM_REQUEST_INTERVAL_MS = 8L
 
 class CameraController(
     private val context: Context,
-    private val surfaceView: SurfaceView,
+    private val previewView: TextureView,
     private val listener: Listener
 ) {
     interface Listener {
@@ -61,6 +65,7 @@ class CameraController(
         )
         fun onCaptureStarted(exposureNs: Long?)
         fun onCaptureFinished(uri: Uri?, error: String?)
+        fun onPhotoSaved(uri: Uri?, error: String?)
         fun onRecordingStarted(config: VideoConfig, withAudio: Boolean)
         fun onRecordingFinished(uri: Uri?, error: String?)
         fun onCameraError(message: String)
@@ -70,7 +75,6 @@ class CameraController(
 
     private data class PendingCapture(
         val needAe: Boolean,
-        val needAf: Boolean,
         val needLens: Boolean,
         /** Only results at or after this time may satisfy the readiness checks. */
         val startedMs: Long,
@@ -85,8 +89,8 @@ class CameraController(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val saver = PhotoSaver(
         context,
-        onSaved = { uri, _ -> cameraHandler.post { finishCapture(uri, null) } },
-        onError = { message -> cameraHandler.post { finishCapture(null, message) } }
+        onSaved = { uri, _ -> listener.onPhotoSaved(uri, null) },
+        onError = { message -> listener.onPhotoSaved(null, message) }
     )
 
     @Volatile
@@ -106,6 +110,8 @@ class CameraController(
 
     private var facing: Facing = Facing.BACK
     private var started = false
+    @Volatile
+    private var captureAspectMode = CaptureAspectMode.PORTRAIT_9_16
 
     private var surfaceReady = false
     private var previewSurface: Surface? = null
@@ -152,6 +158,7 @@ class CameraController(
     private var lastTransform: FloatArray? = null
     private var lastAutoGains: FloatArray? = null
     private var lastReadoutMs = 0L
+    private var pendingZoomRequest: Runnable? = null
     private var lastVerification = "No still capture yet."
     private var lastIssues: List<String> = emptyList()
 
@@ -198,22 +205,40 @@ class CameraController(
         cameraHandler.post {
             started = false
             closeCamera()
+            previewSurface?.release()
+            previewSurface = null
             handlerThread.quitSafely()
         }
         saver.shutdown()
     }
 
-    fun onSurfaceAvailable() {
+    fun onSurfaceAvailable(surfaceTexture: SurfaceTexture) {
         cameraHandler.post {
+            previewSurface?.release()
+            previewSurface = Surface(surfaceTexture)
             surfaceReady = true
             if (started) openCameraIfReady()
         }
     }
 
-    fun onSurfaceDestroyed() {
+    private fun preparePreviewSurface(plan: AspectPlan): Surface? {
+        val texture = previewView.surfaceTexture ?: return null
+        return try {
+            texture.setDefaultBufferSize(plan.previewSize.width, plan.previewSize.height)
+            previewSurface?.takeIf { it.isValid } ?: Surface(texture).also { previewSurface = it }
+        } catch (t: Throwable) {
+            Log.e(tag, "could not prepare preview buffer ${plan.previewSize}", t)
+            null
+        }
+    }
+
+    fun onSurfaceDestroyed(surfaceTexture: SurfaceTexture) {
         cameraHandler.post {
             closeCamera()
             surfaceReady = false
+            previewSurface?.release()
+            previewSurface = null
+            surfaceTexture.release()
         }
     }
 
@@ -226,6 +251,19 @@ class CameraController(
 
     fun setDeviceRotation(degrees: Int) {
         deviceRotation = OrientationMath.normalizeDegrees(degrees)
+    }
+
+    fun setCaptureAspectMode(mode: CaptureAspectMode) {
+        cameraHandler.post {
+            if (captureAspectMode == mode || recording || recorder != null) return@post
+            captureAspectMode = mode
+            aeRegion = null
+            afRegion = null
+            if (device != null) {
+                closeSessionAndReader()
+                if (surfaceReady) createSession()
+            }
+        }
     }
 
     // ---------------------------------------------------------------- public state
@@ -323,7 +361,14 @@ class CameraController(
             val clamped = zoom.coerceIn(1f, s.lens.maxZoom.coerceAtLeast(1f))
             if (kotlin.math.abs(clamped - s.zoom) < 0.001f) return@post
             state = s.copy(zoom = clamped)
-            applyPreview()
+            if (pendingZoomRequest == null) {
+                val update = Runnable {
+                    pendingZoomRequest = null
+                    applyPreview()
+                }
+                pendingZoomRequest = update
+                cameraHandler.postDelayed(update, ZOOM_REQUEST_INTERVAL_MS)
+            }
         }
     }
 
@@ -401,8 +446,8 @@ class CameraController(
             if (s.focus is FocusMode.Manual) return@post
             val plan = currentPlan ?: return@post
             val lens = s.lens
-            val width = surfaceView.width
-            val height = surfaceView.height
+            val width = previewView.width
+            val height = previewView.height
             if (width <= 0 || height <= 0) return@post
             val useZoomRatio = effectiveStrategy == LensMode.LOGICAL && lens.zoomRatioRange != null
             val cropArray = if (effectiveStrategy == LensMode.LOGICAL) lens.logicalActiveArray else lens.activeArray
@@ -444,7 +489,7 @@ class CameraController(
 
     // ---------------------------------------------------------------- video
 
-    /** Switches still and video sessions while retaining each stream's native frame ratio. */
+    /** Switches still and video sessions to the selected saved framing. */
     fun setVideoMode(enabled: Boolean) {
         cameraHandler.post {
             if (videoMode == enabled || recording || recorder != null) return@post
@@ -538,9 +583,10 @@ class CameraController(
         // Recording needs exactly two outputs: preview and encoder. The JPEG reader goes away so
         // the session stays within every device's guaranteed stream combination.
         closeSessionAndReader()
-        // SurfaceView manages buffer sizing automatically.
-        val preview = surfaceView.holder.surface
-        previewSurface = preview
+        val preview = preparePreviewSurface(plan) ?: run {
+            notifyError("Preview surface is not ready")
+            return
+        }
 
         val rec = VideoRecorder(context)
         var usedAudio = withAudio
@@ -659,11 +705,12 @@ class CameraController(
     }
 
     private fun resolveVideoConfig(lens: LensProfile, requested: VideoConfig? = null): VideoConfig? {
-        val qualities = VideoMath.availableQualities(lens.videoSizes, lens.nativeAspect)
+        val preferredAspect = AspectMath.videoOutputAspect(lens, captureAspectMode)
+        val qualities = VideoMath.availableQualities(lens.videoSizes, preferredAspect)
         val quality = requested?.quality?.takeIf { qualities.contains(it) }
             ?: VideoMath.defaultQuality(qualities)
             ?: return null
-        val size = VideoMath.sizeFor(quality, lens.videoSizes, lens.nativeAspect) ?: return null
+        val size = VideoMath.sizeFor(quality, lens.videoSizes, preferredAspect) ?: return null
         val fpsOptions = VideoMath.supportedFps(lens.videoFpsRanges)
         val fps = VideoMath.fpsFor(requested?.fps ?: VideoMath.DEFAULT_FPS, fpsOptions)
         return VideoConfig(quality, size, fps)
@@ -767,7 +814,7 @@ class CameraController(
 
         // Video keeps the preview on the encoder's aspect even before recording starts, so the
         // framing does not jump when the user presses record.
-        val photoPlan = AspectMath.planNative(s.lens)
+        val photoPlan = AspectMath.planForCapture(s.lens, captureAspectMode)
         val plan = if (videoMode) {
             resolveVideoConfig(s.lens)?.let { AspectMath.planForOutput(s.lens, it.size) }
                 ?: photoPlan
@@ -775,8 +822,6 @@ class CameraController(
             photoPlan
         }
         currentPlan = plan
-        // SurfaceView manages buffer sizing automatically; no setDefaultBufferSize() needed.
-
         closeSessionAndReader()
         val token = ++sessionToken
 
@@ -789,8 +834,10 @@ class CameraController(
         jpegReader.setOnImageAvailableListener(jpegListener, cameraHandler)
         reader = jpegReader
 
-        val pSurface = surfaceView.holder.surface
-        previewSurface = pSurface
+        val pSurface = preparePreviewSurface(plan) ?: run {
+            notifyError("Preview surface is not ready")
+            return
+        }
 
         val lens = s.lens
         val physicalId = lens.physicalId
@@ -954,9 +1001,7 @@ class CameraController(
         runCatching { reader?.setOnImageAvailableListener(null, null) }
         runCatching { reader?.close() }
         reader = null
-        // previewSurface is a reference to the SurfaceHolder's surface; do not release it —
-        // the holder owns its lifecycle.
-        previewSurface = null    }
+    }
 
     private fun closeCamera() {
         generation++
@@ -985,6 +1030,14 @@ class CameraController(
         val plan = currentPlan ?: return null
         val d = device ?: return null
         val surface = previewSurface ?: return null
+        val requestedVideoFps = if (videoMode) {
+            resolveVideoConfig(s.lens)?.fps ?: VideoMath.DEFAULT_FPS
+        } else {
+            null
+        }
+        val previewFpsRange = requestedVideoFps?.let {
+            VideoMath.aeRangeFor(it, s.lens.videoFpsRanges)
+        } ?: VideoMath.previewAeRange(s.lens.videoFpsRanges)
         val spec = RequestBuilder.build(
             state = s,
             profile = s.lens,
@@ -994,7 +1047,8 @@ class CameraController(
             previewClamp = true,
             focusAssist = focusAssist,
             fallbackTransform = lastTransform,
-            videoFps = if (videoMode) resolveVideoConfig(s.lens)?.fps ?: VideoMath.DEFAULT_FPS else null,
+            videoFps = requestedVideoFps,
+            videoFpsRange = previewFpsRange?.let { RangeI(it.first, it.last) },
             videoMode = videoMode,
             exposureCompensation = exposureCompensationSteps
         )
@@ -1084,15 +1138,16 @@ class CameraController(
         mainHandler.post { listener.onCaptureStarted(manualShutter) }
 
         val needAe = s.exposure is ExposureMode.Auto && s.flash && s.lens.alwaysFlashSupported
-        val needAf = s.focus is FocusMode.Auto && s.lens.afContinuousSupported
         val needLens = s.focus is FocusMode.Manual
         val now = SystemClock.elapsedRealtime()
         val deadline = now + when {
             needAe -> 1_600L
-            needAf || needLens -> 1_100L
+            needLens -> 1_100L
             else -> 0L
         }
-        pending = PendingCapture(needAe, needAf, needLens, now, deadline)
+        // Continuous autofocus keeps working on the preview stream. Don't add shutter lag by
+        // waiting for its passive AF state to change; capture with the current focus position.
+        pending = PendingCapture(needAe, needLens, now, deadline)
 
         if (needAe) {
             val builder = buildPreviewRequest()
@@ -1130,23 +1185,14 @@ class CameraController(
         val r = latestReadout?.takeIf { it.timestampMs >= p.startedMs }
         val aeReady = !p.needAe || r?.aeState == CameraMetadata.CONTROL_AE_STATE_CONVERGED ||
             r?.aeState == CameraMetadata.CONTROL_AE_STATE_LOCKED
-        val afReady = !p.needAf || isAfReady(r?.afState)
         val lensReady = !p.needLens || r?.lensState == CameraMetadata.LENS_STATE_STATIONARY
         val timedOut = SystemClock.elapsedRealtime() >= p.deadlineMs
-        if (force || timedOut || (aeReady && afReady && lensReady)) {
-            if (force && !(aeReady && afReady && lensReady)) {
-                Log.w(tag, "capture settling timed out; firing anyway (ae=$aeReady af=$afReady lens=$lensReady)")
+        if (force || timedOut || (aeReady && lensReady)) {
+            if (force && !(aeReady && lensReady)) {
+                Log.w(tag, "capture settling timed out; firing anyway (ae=$aeReady lens=$lensReady)")
             }
             fireCapture()
         }
-    }
-
-    private fun isAfReady(afState: Int?): Boolean = when (afState) {
-        CameraMetadata.CONTROL_AF_STATE_FOCUSED_LOCKED,
-        CameraMetadata.CONTROL_AF_STATE_PASSIVE_FOCUSED,
-        CameraMetadata.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED,
-        CameraMetadata.CONTROL_AF_STATE_PASSIVE_UNFOCUSED -> true
-        else -> false
     }
 
     private fun fireCapture() {
@@ -1361,7 +1407,10 @@ class CameraController(
             // seconds on a busy device, so stop it here; saving reports its own result.
             captureWatchdog?.let { cameraHandler.removeCallbacks(it) }
             captureWatchdog = null
-            saver.save(bytes)
+            saver.save(bytes, image.width, image.height)
+            // The camera is ready for the next frame now. Let the independent save worker finish
+            // writing the original JPEG without keeping the shutter UI in a busy state.
+            finishCapture(null, null)
         } catch (t: Throwable) {
             Log.e(tag, "JPEG read failed", t)
             failCapture("Could not read JPEG: ${t.message}")

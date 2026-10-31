@@ -4,15 +4,18 @@ import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.view.SurfaceView
+import android.graphics.SurfaceTexture
+import android.view.TextureView
 import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.necra.purecam.CameraController
 import com.necra.purecam.LensCatalog
 import com.necra.purecam.R
+import com.necra.purecam.core.AspectMath
 import com.necra.purecam.core.AspectPlan
 import com.necra.purecam.core.CameraState
+import com.necra.purecam.core.CaptureAspectMode
 import com.necra.purecam.core.ExposureMode
 import com.necra.purecam.core.Facing
 import com.necra.purecam.core.FocusMode
@@ -70,6 +73,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
             captureMode = prefs.captureMode,
             videoQuality = prefs.videoQuality,
             videoFps = prefs.videoFps,
+            aspectMode = prefs.aspectMode,
             audioGranted = hasAudioPermission()
         )
     )
@@ -78,46 +82,56 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     /**
      * Minimal state consumed by the live preview surface. Extracted into its own flow so that
      * zoom, capture-state, and other control changes never cause the [AndroidView] hosting
-     * the [SurfaceView] to recompose — it only reacts to lens/session changes that actually
+     * the [TextureView] to recompose — it only reacts to lens/session changes that actually
      * alter the framing.
      */
     val previewState = _uiState
-        .map { PreviewState(facing = it.facing, plan = it.plan) }
+        .map {
+            PreviewState(
+                facing = it.facing,
+                plan = it.plan,
+                sensorOrientation = it.lens?.sensorOrientation ?: 0,
+                deviceRotation = it.deviceRotation
+            )
+        }
         .distinctUntilChanged()
 
     private val _signals = MutableSharedFlow<CameraSignal>(extraBufferCapacity = 16)
     val signals = _signals.asSharedFlow()
 
     private var controller: CameraController? = null
-    private var preview: SurfaceView? = null
+    private var preview: TextureView? = null
     private var resumed = false
     private var countdownJob: Job? = null
     /** Live zoom for gesture accumulation; not pushed through UI state while pinching. */
     private var currentZoom = 1f
     private var audioPermissionAsked = false
     private var pendingRecordConfig: VideoConfig? = null
+    private var restoredWbCameraId: String? = null
 
     // ------------------------------------------------------------------ host lifecycle
 
     /** Called from the AndroidView factory. Re-attaches cleanly after activity recreation. */
-    fun attachPreview(surfaceView: SurfaceView) {
-        if (preview === surfaceView && controller != null) return
+    fun attachPreview(previewView: TextureView) {
+        if (preview === previewView && controller != null) return
         controller?.shutdown()
-        controller = CameraController(getApplication(), surfaceView, this).also {
-            preview = surfaceView
+        restoredWbCameraId = null
+        controller = CameraController(getApplication(), previewView, this).also {
+            preview = previewView
             // Queued before start(), so restored preferences are honoured from the first session.
             it.setVideoMode(_uiState.value.videoMode)
+            it.setCaptureAspectMode(_uiState.value.aspectMode)
             it.setDeviceRotation(_uiState.value.deviceRotation)
         }
         startIfAllowed()
     }
 
-    fun onPreviewSurfaceAvailable() {
-        controller?.onSurfaceAvailable()
+    fun onPreviewSurfaceAvailable(surfaceTexture: SurfaceTexture) {
+        controller?.onSurfaceAvailable(surfaceTexture)
     }
 
-    fun onPreviewSurfaceDestroyed() {
-        controller?.onSurfaceDestroyed()
+    fun onPreviewSurfaceDestroyed(surfaceTexture: SurfaceTexture) {
+        controller?.onSurfaceDestroyed(surfaceTexture)
     }
 
     fun onResume() {
@@ -164,7 +178,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         if (mode == CaptureMode.VIDEO) {
             val canRecord = _uiState.value.supportsVideo ||
                 _uiState.value.lens?.let {
-                    VideoMath.availableQualities(it.videoSizes, it.nativeAspect).isNotEmpty()
+                    VideoMath.availableQualities(
+                        it.videoSizes,
+                        AspectMath.videoOutputAspect(it, _uiState.value.aspectMode)
+                    ).isNotEmpty()
                 } == true
             if (!canRecord) {
                 emitMessage(message(R.string.video_unavailable))
@@ -189,6 +206,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         if (!_uiState.value.availableVideoFps.contains(fps)) return
         prefs.videoFps = fps
         _uiState.update { it.copy(videoFps = fps) }
+    }
+
+    fun setCaptureAspectMode(mode: CaptureAspectMode) {
+        if (_uiState.value.aspectMode == mode || _uiState.value.recording || _uiState.value.recordingStarting) return
+        prefs.aspectMode = mode
+        _uiState.update { it.copy(aspectMode = mode) }
+        controller?.setCaptureAspectMode(mode)
     }
 
     fun toggleFlash() {
@@ -282,6 +306,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
             is WhiteBalanceMode.Kelvin -> WhiteBalanceMode.Auto
         }
         controller?.setWhiteBalance(next)
+        prefs.whiteBalance = next
     }
 
     /** Exposure compensation in EV, applied on top of auto exposure. */
@@ -376,15 +401,20 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     }
 
     fun setWhiteBalanceAuto() {
+        prefs.whiteBalance = WhiteBalanceMode.Auto
         controller?.setWhiteBalance(WhiteBalanceMode.Auto)
     }
 
     fun setWhiteBalancePreset(preset: WbPreset) {
-        controller?.setWhiteBalance(WhiteBalanceMode.Preset(preset))
+        val mode = WhiteBalanceMode.Preset(preset)
+        prefs.whiteBalance = mode
+        controller?.setWhiteBalance(mode)
     }
 
     fun setWhiteBalanceKelvin(kelvin: Int) {
-        controller?.setWhiteBalance(WhiteBalanceMode.Kelvin(kelvin))
+        val mode = WhiteBalanceMode.Kelvin(kelvin)
+        prefs.whiteBalance = mode
+        controller?.setWhiteBalance(mode)
     }
 
     fun suggestedKelvin(): Int = controller?.suggestedKelvin() ?: 5200
@@ -428,11 +458,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         plan: AspectPlan?,
         strategy: LensMode
     ) {
+        if (restoredWbCameraId != state.lens.id) {
+            restoredWbCameraId = state.lens.id
+            controller?.setWhiteBalance(prefs.whiteBalance)
+        }
         // A lens change (or a fallback) can land on a camera that cannot record; leave video mode
         // instead of showing a record button that can never work.
         currentZoom = state.zoom
         if (_uiState.value.videoMode &&
-            VideoMath.availableQualities(state.lens.videoSizes, state.lens.nativeAspect).isEmpty()
+            VideoMath.availableQualities(
+                state.lens.videoSizes,
+                AspectMath.videoOutputAspect(state.lens, _uiState.value.aspectMode)
+            ).isEmpty()
         ) {
             prefs.captureMode = CaptureMode.PHOTO
             _uiState.update { it.copy(captureMode = CaptureMode.PHOTO) }
@@ -452,11 +489,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     override fun onCaptureFinished(uri: Uri?, error: String?) {
         _uiState.update { it.copy(capturing = false) }
         if (uri != null) {
+            onPhotoSaved(uri, null)
+        } else if (error != null && error != "Capture cancelled") {
+            emitMessage(error)
+        }
+    }
+
+    override fun onPhotoSaved(uri: Uri?, error: String?) {
+        if (uri != null) {
             prefs.lastPhoto = uri
             prefs.lastMediaIsVideo = false
             _uiState.update { it.copy(lastPhoto = uri, lastMediaIsVideo = false) }
             emitMessage(message(R.string.saved_to_dcim))
-        } else if (error != null && error != "Capture cancelled") {
+        } else if (error != null) {
             emitMessage(error)
         }
     }

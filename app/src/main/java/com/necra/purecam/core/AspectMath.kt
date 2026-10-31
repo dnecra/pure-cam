@@ -1,6 +1,6 @@
 package com.necra.purecam.core
 
-/** Stream sizes and upright ratios used to keep the preview framed without changing captures. */
+/** Camera stream sizes and upright ratios for preview framing and saved captures. */
 data class AspectPlan(
     /** Ratio of the camera or encoder output buffer, before display rotation. */
     val outputAspect: Float,
@@ -11,12 +11,64 @@ data class AspectPlan(
     val contentAspect: Float
 )
 
+/** Saved framing shared by photo and video capture. Portrait crop is the default. */
+enum class CaptureAspectMode {
+    PORTRAIT_9_16,
+    ORIGINAL
+}
+
 object AspectMath {
 
     fun planNative(profile: LensProfile, maxPreviewWidth: Int = 1920): AspectPlan {
         val jpeg = largestSize(profile.jpegSizes)
             ?: SizeI(profile.activeArray.width, profile.activeArray.height)
         return createPlan(profile, jpeg, jpeg.aspect, profile.previewSizes, maxPreviewWidth)
+    }
+
+    fun planForCapture(profile: LensProfile, mode: CaptureAspectMode): AspectPlan = when (mode) {
+        CaptureAspectMode.ORIGINAL -> planNative(profile)
+        CaptureAspectMode.PORTRAIT_9_16 -> planForDisplayAspect(profile, 9f / 16f)
+    }
+
+    /** Sensor-space ratio needed to show [displayAspect] after the device's JPEG/video rotation. */
+    fun outputAspectForDisplay(profile: LensProfile, displayAspect: Float): Float =
+        if (profile.sensorOrientation % 180 == 90) 1f / displayAspect else displayAspect
+
+    /** Preferred video buffer ratio for the user's selected display framing. */
+    fun videoOutputAspect(profile: LensProfile, mode: CaptureAspectMode): Float = when (mode) {
+        CaptureAspectMode.ORIGINAL -> profile.nativeAspect
+        CaptureAspectMode.PORTRAIT_9_16 -> outputAspectForDisplay(profile, 9f / 16f)
+    }
+
+    /**
+     * Build a camera plan from a supported JPEG size closest to the requested upright ratio.
+     * Keeping the JPEG stream at that ratio lets the camera produce the crop directly, without
+     * decoding and re-encoding the captured image in app code.
+     */
+    fun planForDisplayAspect(
+        profile: LensProfile,
+        displayAspect: Float,
+        maxPreviewWidth: Int = 1920
+    ): AspectPlan {
+        val targetAspect = outputAspectForDisplay(profile, displayAspect)
+        val matchingJpeg = profile.jpegSizes
+            .filter { relativeAspectError(it.aspect, targetAspect) < 0.01f }
+            .maxByOrNull { it.area }
+        val jpeg = matchingJpeg
+            ?: largestSize(profile.jpegSizes)
+            ?: SizeI(profile.activeArray.width, profile.activeArray.height)
+        val outputAspect = jpeg.aspect
+        return createPlan(profile, jpeg, outputAspect, profile.previewSizes, maxPreviewWidth)
+    }
+
+    /** Center-cropped encoded dimensions for a stream buffer and target sensor-space ratio. */
+    fun cropSize(size: SizeI, targetAspect: Float): SizeI {
+        if (size.width <= 0 || size.height <= 0 || targetAspect <= 0f) return size
+        return if (size.aspect > targetAspect) {
+            SizeI((size.height * targetAspect).toInt().coerceAtLeast(1), size.height)
+        } else {
+            SizeI(size.width, (size.width / targetAspect).toInt().coerceAtLeast(1))
+        }
     }
 
     /** Plan for a fixed video encoder buffer; its stream ratio is preserved in the saved clip. */

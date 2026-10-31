@@ -36,7 +36,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.FrameRateCategory
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.preferredFrameRate
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -88,7 +90,10 @@ fun PureCamApp(viewModel: CameraViewModel) {
         }
     }
 
-    Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
+    Surface(
+        modifier = Modifier.fillMaxSize().preferredFrameRate(FrameRateCategory.High),
+        color = Color.Black
+    ) {
         if (state.hasPermission) {
             GoogleCameraScreen(
                 state = state,
