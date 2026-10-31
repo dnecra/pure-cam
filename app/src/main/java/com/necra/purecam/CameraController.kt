@@ -2,7 +2,6 @@ package com.necra.purecam
 
 import android.content.Context
 import android.graphics.ImageFormat
-import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraAccessException
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
@@ -22,7 +21,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
-import android.view.TextureView
+import android.view.SurfaceView
 import com.necra.purecam.core.AspectMath
 import com.necra.purecam.core.AspectPlan
 import com.necra.purecam.core.CameraState
@@ -50,7 +49,7 @@ private const val READOUT_INTERVAL_MS = 200L
 
 class CameraController(
     private val context: Context,
-    private val textureView: TextureView,
+    private val surfaceView: SurfaceView,
     private val listener: Listener
 ) {
     interface Listener {
@@ -108,7 +107,7 @@ class CameraController(
     private var facing: Facing = Facing.BACK
     private var started = false
 
-    private var surfaceTexture: SurfaceTexture? = null
+    private var surfaceReady = false
     private var previewSurface: Surface? = null
     private var reader: ImageReader? = null
     private var device: CameraDevice? = null
@@ -206,7 +205,7 @@ class CameraController(
 
     fun onSurfaceAvailable() {
         cameraHandler.post {
-            surfaceTexture = textureView.surfaceTexture
+            surfaceReady = true
             if (started) openCameraIfReady()
         }
     }
@@ -214,7 +213,7 @@ class CameraController(
     fun onSurfaceDestroyed() {
         cameraHandler.post {
             closeCamera()
-            surfaceTexture = null
+            surfaceReady = false
         }
     }
 
@@ -402,8 +401,8 @@ class CameraController(
             if (s.focus is FocusMode.Manual) return@post
             val plan = currentPlan ?: return@post
             val lens = s.lens
-            val width = textureView.width
-            val height = textureView.height
+            val width = surfaceView.width
+            val height = surfaceView.height
             if (width <= 0 || height <= 0) return@post
             val useZoomRatio = effectiveStrategy == LensMode.LOGICAL && lens.zoomRatioRange != null
             val cropArray = if (effectiveStrategy == LensMode.LOGICAL) lens.logicalActiveArray else lens.activeArray
@@ -478,7 +477,7 @@ class CameraController(
                 notifyError("This lens cannot record video")
                 return@post
             }
-            if (device == null || session == null || surfaceTexture == null) {
+            if (device == null || session == null || !surfaceReady) {
                 // The audio-permission dialog pauses the activity and the camera reopens
                 // asynchronously; honour the tap once the session is back.
                 pendingRecording = actual to withAudio
@@ -529,7 +528,7 @@ class CameraController(
     }
 
     private fun startRecordingSession(config: VideoConfig, withAudio: Boolean) {
-        val st = surfaceTexture ?: return
+        if (!surfaceReady) return
         val d = device ?: return
         val lens = state?.lens ?: return
 
@@ -539,8 +538,8 @@ class CameraController(
         // Recording needs exactly two outputs: preview and encoder. The JPEG reader goes away so
         // the session stays within every device's guaranteed stream combination.
         closeSessionAndReader()
-        st.setDefaultBufferSize(plan.previewSize.width, plan.previewSize.height)
-        val preview = Surface(st)
+        // SurfaceView manages buffer sizing automatically.
+        val preview = surfaceView.holder.surface
         previewSurface = preview
 
         val rec = VideoRecorder(context)
@@ -716,8 +715,7 @@ class CameraController(
 
     private fun openCameraIfReady() {
         if (!started) return
-        val st = surfaceTexture ?: return
-        if (st.isReleased) return
+        if (!surfaceReady) return
         val s = state ?: return
         if (device != null) closeCamera()
         val gen = ++generation
@@ -764,7 +762,7 @@ class CameraController(
 
     private fun createSession() {
         val d = device ?: return
-        val st = surfaceTexture ?: return
+        if (!surfaceReady) return
         val s = state ?: return
 
         // Video keeps the preview on the encoder's aspect even before recording starts, so the
@@ -777,7 +775,7 @@ class CameraController(
             photoPlan
         }
         currentPlan = plan
-        st.setDefaultBufferSize(plan.previewSize.width, plan.previewSize.height)
+        // SurfaceView manages buffer sizing automatically; no setDefaultBufferSize() needed.
 
         closeSessionAndReader()
         val token = ++sessionToken
@@ -791,7 +789,7 @@ class CameraController(
         jpegReader.setOnImageAvailableListener(jpegListener, cameraHandler)
         reader = jpegReader
 
-        val pSurface = Surface(st)
+        val pSurface = surfaceView.holder.surface
         previewSurface = pSurface
 
         val lens = s.lens
@@ -956,9 +954,9 @@ class CameraController(
         runCatching { reader?.setOnImageAvailableListener(null, null) }
         runCatching { reader?.close() }
         reader = null
-        runCatching { previewSurface?.release() }
-        previewSurface = null
-    }
+        // previewSurface is a reference to the SurfaceHolder's surface; do not release it —
+        // the holder owns its lifecycle.
+        previewSurface = null    }
 
     private fun closeCamera() {
         generation++

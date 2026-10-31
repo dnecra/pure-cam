@@ -4,7 +4,7 @@ import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.view.TextureView
+import android.view.SurfaceView
 import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -30,6 +30,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -73,11 +75,21 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     )
     val uiState = _uiState.asStateFlow()
 
+    /**
+     * Minimal state consumed by the live preview surface. Extracted into its own flow so that
+     * zoom, capture-state, and other control changes never cause the [AndroidView] hosting
+     * the [SurfaceView] to recompose — it only reacts to lens/session changes that actually
+     * alter the framing.
+     */
+    val previewState = _uiState
+        .map { PreviewState(facing = it.facing, plan = it.plan) }
+        .distinctUntilChanged()
+
     private val _signals = MutableSharedFlow<CameraSignal>(extraBufferCapacity = 16)
     val signals = _signals.asSharedFlow()
 
     private var controller: CameraController? = null
-    private var preview: TextureView? = null
+    private var preview: SurfaceView? = null
     private var resumed = false
     private var countdownJob: Job? = null
     /** Live zoom for gesture accumulation; not pushed through UI state while pinching. */
@@ -88,11 +100,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     // ------------------------------------------------------------------ host lifecycle
 
     /** Called from the AndroidView factory. Re-attaches cleanly after activity recreation. */
-    fun attachPreview(textureView: TextureView) {
-        if (preview === textureView && controller != null) return
+    fun attachPreview(surfaceView: SurfaceView) {
+        if (preview === surfaceView && controller != null) return
         controller?.shutdown()
-        controller = CameraController(getApplication(), textureView, this).also {
-            preview = textureView
+        controller = CameraController(getApplication(), surfaceView, this).also {
+            preview = surfaceView
             // Queued before start(), so restored preferences are honoured from the first session.
             it.setVideoMode(_uiState.value.videoMode)
             it.setDeviceRotation(_uiState.value.deviceRotation)

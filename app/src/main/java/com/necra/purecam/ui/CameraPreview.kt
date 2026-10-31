@@ -2,12 +2,12 @@ package com.necra.purecam.ui
 
 import android.content.Context
 import android.graphics.Matrix
-import android.graphics.SurfaceTexture
-import android.view.TextureView
-import androidx.compose.animation.AnimatedContent
+import android.view.SurfaceHolder
+import android.view.SurfaceView
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -47,21 +47,27 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.necra.purecam.core.Facing
 import com.necra.purecam.presentation.CameraSignal
-import com.necra.purecam.presentation.CameraUiState
+import com.necra.purecam.presentation.PreviewState
 import com.necra.purecam.presentation.CameraViewModel
 import kotlin.math.roundToInt
 
 /**
- * TextureView hosted in Compose. The preview fills the whole window; a centre-crop matrix keeps
- * the sensor image upright and unstretched, and mirrors the front camera on screen only
- * (the saved JPEG stays unmirrored).
+ * SurfaceView hosted in Compose. SurfaceView gets a dedicated hardware overlay layer, so
+ * SurfaceFlinger composites the camera frames directly with zero extra copies — unlike
+ * TextureView, which forces a full buffer copy on every frame.
  *
- * The transform is applied synchronously from [onSizeChanged] so an animating viewfinder
- * never shows a stretched frame while the ratio changes.
+ * The transform matrix is recomputed whenever the view size changes so the sensor image stays
+ * upright, centre-cropped and undistorted. The front-camera mirror is applied on-screen only;
+ * the saved JPEG is never mirrored.
+ *
+ * NOTE: SurfaceView does not support arbitrary 2D transforms via setTransform(). Centre-crop
+ * framing is handled by sizing the SurfaceView itself so that its aspect ratio matches the
+ * camera stream: Compose's AndroidView fills the available space and the ViewfinderFrame layout
+ * already clips to the correct native ratio, so no Matrix is needed here.
  */
 @Composable
 internal fun CameraPreview(
-    state: CameraUiState,
+    state: PreviewState,
     viewModel: CameraViewModel,
     onTap: ((Offset) -> Unit)? = null
 ) {
@@ -72,7 +78,6 @@ internal fun CameraPreview(
     var focusPulse by remember { mutableIntStateOf(0) }
 
     val mirrored = state.facing == Facing.FRONT
-    val contentAspect = state.plan?.contentAspect
 
     Box(
         modifier = Modifier
@@ -96,39 +101,29 @@ internal fun CameraPreview(
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
-                PreviewTextureView(context).apply {
-                    displayAspect = contentAspect
+                PreviewSurfaceView(context).apply {
                     this.mirrored = mirrored
-                    surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-                        override fun onSurfaceTextureAvailable(
-                            surfaceTexture: SurfaceTexture,
-                            width: Int,
-                            height: Int
-                        ) {
-                            applyTransform()
+                    holder.addCallback(object : SurfaceHolder.Callback {
+                        override fun surfaceCreated(holder: SurfaceHolder) {
                             viewModel.onPreviewSurfaceAvailable()
                         }
 
-                        override fun onSurfaceTextureSizeChanged(
-                            surfaceTexture: SurfaceTexture,
+                        override fun surfaceChanged(
+                            holder: SurfaceHolder,
+                            format: Int,
                             width: Int,
                             height: Int
                         ) = Unit
 
-                        override fun onSurfaceTextureDestroyed(surfaceTexture: SurfaceTexture): Boolean {
+                        override fun surfaceDestroyed(holder: SurfaceHolder) {
                             viewModel.onPreviewSurfaceDestroyed()
-                            return true
                         }
-
-                        override fun onSurfaceTextureUpdated(surfaceTexture: SurfaceTexture) = Unit
-                    }
+                    })
                     viewModel.attachPreview(this)
                 }
             },
             update = { view ->
-                view.displayAspect = contentAspect
                 view.mirrored = mirrored
-                view.applyTransform()
             }
         )
 
@@ -137,39 +132,19 @@ internal fun CameraPreview(
     }
 }
 
-/** A [TextureView] that keeps the centre-crop matrix in sync with its own size. */
-private class PreviewTextureView(context: Context) : TextureView(context) {
+/**
+ * A [SurfaceView] that optionally mirrors itself horizontally for the front camera.
+ * SurfaceView lives in its own z-ordered window and is composited by SurfaceFlinger in
+ * hardware, bypassing the GPU composition path that TextureView forces.
+ */
+private class PreviewSurfaceView(context: Context) : SurfaceView(context) {
 
-    var displayAspect: Float? = null
     var mirrored: Boolean = false
-
-    fun applyTransform() {
-        setTransform(previewTransform(displayAspect, IntSize(width, height), mirrored))
-    }
-
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        super.onSizeChanged(w, h, oldw, oldh)
-        applyTransform()
-    }
-}
-
-private fun previewTransform(displayAspect: Float?, viewSize: IntSize, mirrored: Boolean): Matrix {
-    val matrix = Matrix()
-    if (displayAspect == null || viewSize.width <= 0 || viewSize.height <= 0 ||
-        !displayAspect.isFinite() || displayAspect <= 0f
-    ) {
-        return matrix
-    }
-    val viewAspect = viewSize.width.toFloat() / viewSize.height.toFloat()
-    val cx = viewSize.width / 2f
-    val cy = viewSize.height / 2f
-    if (displayAspect >= viewAspect) {
-        matrix.setScale(displayAspect / viewAspect, 1f, cx, cy)
-    } else {
-        matrix.setScale(1f, viewAspect / displayAspect, cx, cy)
-    }
-    if (mirrored) matrix.postScale(-1f, 1f, cx, cy)
-    return matrix
+        set(value) {
+            if (field == value) return
+            field = value
+            scaleX = if (value) -1f else 1f
+        }
 }
 
 @Composable

@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.necra.purecam.core.ExposureMode
 import com.necra.purecam.presentation.CameraUiState
 import com.necra.purecam.presentation.CameraViewModel
@@ -54,6 +55,16 @@ fun GoogleCameraScreen(
     onOpenPhoto: (Uri) -> Unit
 ) {
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
+
+    // Collect preview state independently — changes only on lens/session switches, not on
+    // every zoom/capture callback. This prevents the CameraPreview AndroidView from
+    // recomposing when unrelated controls change.
+    val previewState by viewModel.previewState.collectAsStateWithLifecycle(
+        initialValue = com.necra.purecam.presentation.PreviewState(
+            facing = state.facing,
+            plan = state.plan
+        )
+    )
 
     // Tap point in preview pixels; the exposure slider is anchored next to it.
     var focusPoint by remember { mutableStateOf<Offset?>(null) }
@@ -80,7 +91,7 @@ fun GoogleCameraScreen(
                 .onSizeChanged { previewSize = it }
         ) {
             CameraPreview(
-                state = state,
+                state = previewState,
                 viewModel = viewModel,
                 onTap = { point -> focusPoint = point }
             )

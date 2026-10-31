@@ -14,6 +14,17 @@ import com.necra.purecam.core.VideoQuality
 enum class CaptureMode { PHOTO, VIDEO }
 
 /**
+ * Minimal snapshot consumed by the live preview surface. Carried by a separate
+ * [kotlinx.coroutines.flow.StateFlow] so that zoom, flash and other control changes never
+ * recompose the [AndroidView] that hosts the preview — it only updates on actual
+ * lens/session changes.
+ */
+data class PreviewState(
+    val facing: Facing? = null,
+    val plan: AspectPlan? = null
+)
+
+/**
  * One immutable snapshot of everything the camera screen renders.
  * Produced only by [CameraViewModel]; the UI never mutates it.
  */
