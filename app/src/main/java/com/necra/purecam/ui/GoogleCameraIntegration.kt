@@ -1,6 +1,12 @@
 package com.necra.purecam.ui
 
 import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -97,14 +103,20 @@ fun GoogleCameraScreen(
             )
 
             val point = focusPoint
-            if (point != null && state.cameraState?.exposure is ExposureMode.Auto) {
-                ExposureSlider(
-                    point = point,
-                    viewSize = previewSize,
-                    ev = exposureEv,
-                    onEvChange = viewModel::setExposureCompensation,
-                    onDismiss = { focusPoint = null }
-                )
+            AnimatedVisibility(
+                visible = point != null && state.cameraState?.exposure is ExposureMode.Auto,
+                enter = fadeIn(spring(dampingRatio = 0.72f)) + scaleIn(spring(dampingRatio = 0.72f)),
+                exit = fadeOut() + scaleOut(spring(dampingRatio = 0.82f))
+            ) {
+                point?.let {
+                    ExposureSlider(
+                        point = it,
+                        viewSize = previewSize,
+                        ev = exposureEv,
+                        onEvChange = viewModel::setExposureCompensation,
+                        onDismiss = { focusPoint = null }
+                    )
+                }
             }
         }
     }

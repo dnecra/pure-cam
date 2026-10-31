@@ -2,10 +2,17 @@
 
 import android.net.Uri
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -38,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.layout
@@ -198,12 +206,15 @@ fun GoogleCameraUI(
                     }
 
                     // Recording indicator.
-                    if (state.recording) {
-                        RecordingPill(
-                            modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .padding(top = 60.dp)
-                        )
+                    AnimatedVisibility(
+                        visible = state.recording,
+                        modifier = Modifier.align(Alignment.TopCenter).padding(top = 60.dp),
+                        enter = fadeIn(spring(stiffness = 420f)) +
+                            scaleIn(spring(dampingRatio = 0.72f)) +
+                            slideInVertically(spring(stiffness = 420f)) { -it / 3 },
+                        exit = fadeOut() + scaleOut(spring(dampingRatio = 0.8f)) + slideOutVertically { -it / 4 }
+                    ) {
+                        RecordingPill()
                     }
 
                     // Bottom stack inside the card: lens menu + shutter row.
@@ -214,7 +225,12 @@ fun GoogleCameraUI(
                             .padding(horizontal = 20.dp, vertical = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        if (lenses.size > 1) {
+                        AnimatedVisibility(
+                            visible = lenses.size > 1,
+                            enter = fadeIn(spring(stiffness = 420f)) +
+                                slideInVertically(spring(stiffness = 420f)) { it / 2 },
+                            exit = fadeOut() + slideOutVertically { it / 2 }
+                        ) {
                             LensSegmented(
                                 lenses = lenses,
                                 selectedId = lens?.id,
@@ -443,7 +459,7 @@ private fun LensSegmented(
                 val selected = lens.id == selectedId
                 val background by animateColorAsState(
                     targetValue = if (selected) CamAccent else Color.Transparent,
-                    animationSpec = tween(160),
+                    animationSpec = spring(dampingRatio = 0.78f, stiffness = 620f),
                     label = "lensBg"
                 )
                 val textColor by animateColorAsState(
@@ -452,7 +468,7 @@ private fun LensSegmented(
                         !enabled -> CamMuted
                         else -> CamWhite
                     },
-                    animationSpec = tween(160),
+                    animationSpec = spring(dampingRatio = 0.82f, stiffness = 700f),
                     label = "lensText"
                 )
                 Box(
@@ -612,12 +628,18 @@ private fun SegmentButton(
         label = "segmentTint"
     )
     val shape = RoundedCornerShape(20.dp)
+    val selectedScale by animateFloatAsState(
+        targetValue = if (isSelected) 1f else 0.94f,
+        animationSpec = spring(dampingRatio = 0.68f, stiffness = 520f),
+        label = "modeSegmentScale"
+    )
 
     Surface(
         shape = shape,
         color = backgroundColor,
         modifier = Modifier
             .size(width = 58.dp, height = 40.dp)
+            .graphicsLayer { scaleX = selectedScale; scaleY = selectedScale }
             // Clip before the ripple so the pressed indication follows the pill, not a box.
             .clip(shape)
             .hapticClickable(enabled = enabled, onClick = onClick)

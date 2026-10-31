@@ -31,6 +31,10 @@
     <string name="mode_photo">Photo</string>
     <string name="mode_video">Video</string>
     <string name="capture_settings">Capture settings</string>
+    <string name="capture_settings_subtitle">Capture formats and quality</string>
+    <string name="photo_section">Photo</string>
+    <string name="video_section">Video</string>
+    <string name="video_section_hint">Pick a resolution and frame rate</string>
     <string name="photo_full_resolution">Full sensor resolution · %1$s</string>
     <string name="photo_format_hint">Photos are saved as JPG at the camera\'s native aspect ratio.</string>
     <string name="resolution">Resolution</string>

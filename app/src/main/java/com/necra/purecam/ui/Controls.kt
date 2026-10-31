@@ -1,13 +1,18 @@
 package com.necra.purecam.ui
 
 import android.os.SystemClock
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -19,6 +24,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -124,18 +130,31 @@ internal fun ShutterButton(
             ),
         contentAlignment = Alignment.Center
     ) {
-        when {
-            videoMode && recording -> Box(
-                modifier = Modifier
-                    .size(24.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color.White)
-            )
-            capturing -> CircularProgressIndicator(
-                modifier = Modifier.size(26.dp),
-                color = MaterialTheme.colorScheme.onPrimary,
-                strokeWidth = 2.5.dp
-            )
+        AnimatedContent(
+            targetState = when {
+                capturing -> "capturing"
+                videoMode && recording -> "recording"
+                else -> "idle"
+            },
+            transitionSpec = {
+                (fadeIn(spring(dampingRatio = 0.62f)) + scaleIn(spring(dampingRatio = 0.62f))) togetherWith fadeOut()
+            },
+            label = "shutterState"
+        ) { shutterState ->
+            when (shutterState) {
+                "recording" -> Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(Color.White)
+                )
+                "capturing" -> CircularProgressIndicator(
+                    modifier = Modifier.size(26.dp),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    strokeWidth = 2.5.dp
+                )
+                else -> Spacer(Modifier.size(1.dp))
+            }
         }
     }
 }
