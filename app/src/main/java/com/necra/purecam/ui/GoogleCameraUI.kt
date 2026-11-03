@@ -132,7 +132,7 @@ fun GoogleCameraUI(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 88.dp)
+                .padding(start = 10.dp, end = 10.dp, bottom = 88.dp)
         ) {
             // Plain black card. The preview is clipped by its selected-ratio window, so no extra
             // rounded Surface layer wraps the whole viewfinder (one less layer per frame).
@@ -244,29 +244,30 @@ fun GoogleCameraUI(
                         }
                         if (lenses.size > 1) Spacer(Modifier.height(18.dp))
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
                         ) {
-                            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                                PhotoThumbnail(
-                                    uri = state.lastPhoto,
-                                    isVideo = state.lastMediaIsVideo,
-                                    onClick = onOpenPhoto
-                                )
-                            }
+                            PhotoThumbnail(
+                                uri = state.lastPhoto,
+                                isVideo = state.lastMediaIsVideo,
+                                onClick = onOpenPhoto
+                            )
+                            Spacer(modifier = Modifier.width(24.dp))
                             ShutterButton(
                                 capturing = state.capturing,
                                 recording = state.recording || state.recordingStarting,
                                 videoMode = state.videoMode,
                                 onClick = onShutter
                             )
-                            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-                                FlipButton(
-                                    enabled = canFlip && !state.recording,
-                                    rotationDegrees = state.deviceRotation,
-                                    onClick = onFlip
-                                )
-                            }
+                            Spacer(modifier = Modifier.width(24.dp))
+                            FlipButton(
+                                enabled = canFlip && !state.recording,
+                                rotationDegrees = state.deviceRotation,
+                                onClick = onFlip
+                            )
                         }
                     }
                 }
@@ -529,11 +530,14 @@ private fun BottomBar(
         modifier = modifier
             .fillMaxWidth()
             .height(72.dp)
-            .padding(horizontal = 24.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
     ) {
-        // Equal side weights keep the mode switch exactly centred under the shutter.
-        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+        Box(
+            modifier = Modifier.size(48.dp),
+            contentAlignment = Alignment.CENTER
+        ) {
             BarButton(
                 icon = R.drawable.ic_settings,
                 description = stringResource(R.string.settings),
@@ -541,13 +545,20 @@ private fun BottomBar(
             )
         }
 
+        Spacer(modifier = Modifier.width(24.dp))
+
         SegmentedControl(
             mode = mode,
             enabled = modeEnabled,
             onSelect = onSelectMode
         )
 
-        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+        Spacer(modifier = Modifier.width(24.dp))
+
+        Box(
+            modifier = Modifier.size(48.dp),
+            contentAlignment = Alignment.CENTER
+        ) {
             BarButton(
                 icon = R.drawable.ic_white_balance,
                 description = stringResource(R.string.wb),
@@ -605,9 +616,9 @@ private fun SegmentedControl(
     ) {
         Row(
             modifier = Modifier
-                .height(40.dp)
-                .padding(3.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .height(48.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             SegmentButton(
                 icon = R.drawable.ic_camera,
@@ -649,7 +660,7 @@ private fun SegmentButton(
         animationSpec = tween(160),
         label = "segmentTint"
     )
-    val shape = RoundedCornerShape(20.dp)
+    val shape = CircleShape
     val selectedScale by animateFloatAsState(
         targetValue = if (isSelected) 1f else 0.94f,
         animationSpec = spring(dampingRatio = 0.68f, stiffness = 520f),
@@ -660,7 +671,7 @@ private fun SegmentButton(
         shape = shape,
         color = backgroundColor,
         modifier = Modifier
-            .size(width = 46.dp, height = 34.dp)
+            .size(width = 48.dp, height = 48.dp)
             .graphicsLayer { scaleX = selectedScale; scaleY = selectedScale }
             // Clip before the ripple so the pressed indication follows the pill, not a box.
             .clip(shape)
@@ -674,7 +685,7 @@ private fun SegmentButton(
                 painter = painterResource(icon),
                 contentDescription = description,
                 tint = iconTint,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(24.dp)
             )
         }
     }
