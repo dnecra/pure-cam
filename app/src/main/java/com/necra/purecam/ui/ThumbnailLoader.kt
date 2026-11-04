@@ -38,26 +38,35 @@ internal fun loadThumbnail(context: Context, uri: Uri?, targetPx: Int): ImageBit
             BitmapFactory.decodeStream(it, null, options)
         } ?: return null
 
-        val rotation = runCatching {
+        val exif = runCatching {
             resolver.openInputStream(uri)?.use { stream ->
-                when (
-                    ExifInterface(stream).getAttributeInt(
-                        ExifInterface.TAG_ORIENTATION,
-                        ExifInterface.ORIENTATION_NORMAL
-                    )
-                ) {
-                    ExifInterface.ORIENTATION_ROTATE_90 -> 90f
-                    ExifInterface.ORIENTATION_ROTATE_180 -> 180f
-                    ExifInterface.ORIENTATION_ROTATE_270 -> 270f
-                    else -> 0f
-                }
+                ExifInterface(stream).getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL
+                )
             }
-        }.getOrNull() ?: 0f
+        }.getOrNull() ?: ExifInterface.ORIENTATION_NORMAL
 
-        val upright = if (rotation == 0f) {
+        // Mirrored orientations (2/4/5/7) are used by saved front stills, so the thumbnail has
+        // to apply both the rotation and the horizontal flip described by the tag.
+        val (rotation, mirror) = when (exif) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> 0 to true
+            ExifInterface.ORIENTATION_ROTATE_180 -> 180 to false
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> 180 to true
+            ExifInterface.ORIENTATION_TRANSPOSE -> 90 to true
+            ExifInterface.ORIENTATION_ROTATE_90 -> 90 to false
+            ExifInterface.ORIENTATION_TRANSVERSE -> 270 to true
+            ExifInterface.ORIENTATION_ROTATE_270 -> 270 to false
+            else -> 0 to false
+        }
+
+        val upright = if (rotation == 0 && !mirror) {
             bitmap
         } else {
-            val matrix = Matrix().apply { postRotate(rotation) }
+            val matrix = Matrix().apply {
+                postRotate(rotation.toFloat())
+                if (mirror) postScale(-1f, 1f)
+            }
             Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
                 .also { if (it !== bitmap) bitmap.recycle() }
         }

@@ -124,6 +124,8 @@ class CameraController(
     private var generation = 0
     private var sessionToken = 0
 
+    /** Latest physical rotation, written from the sensor thread and read on the capture thread. */
+    @Volatile
     private var deviceRotation = 0
     private var forceLogicalLensId: String? = null
     private val unsupportedLensIds = HashSet<String>()
@@ -455,7 +457,7 @@ class CameraController(
             val cropArray = if (effectiveStrategy == LensMode.LOGICAL) lens.logicalActiveArray else lens.activeArray
             val crop = AspectMath.cropRect(cropArray, plan.outputAspect, if (useZoomRatio) 1f else s.zoom)
             val point = FocusMath.mapTap(
-                viewX = if (s.lens.facing == Facing.FRONT) width - viewX else viewX,
+                viewX = viewX,
                 viewY = viewY,
                 viewWidth = width,
                 viewHeight = height,
@@ -757,7 +759,7 @@ class CameraController(
 
     private fun videoOrientationHint(): Int {
         val lens = state?.lens ?: return 0
-        return OrientationMath.jpegOrientation(lens.sensorOrientation, deviceRotation, false)
+        return OrientationMath.jpegOrientation(lens.sensorOrientation, deviceRotation, lens.facing)
     }
 
     // ---------------------------------------------------------------- camera open / session
@@ -1114,11 +1116,7 @@ class CameraController(
 
     private fun jpegOrientation(): Int {
         val lens = state?.lens ?: return 0
-        return OrientationMath.jpegOrientation(
-            lens.sensorOrientation,
-            deviceRotation,
-            lens.facing == Facing.FRONT
-        )
+        return OrientationMath.jpegOrientation(lens.sensorOrientation, deviceRotation, lens.facing)
     }
 
     // ---------------------------------------------------------------- capture
@@ -1246,7 +1244,7 @@ class CameraController(
 
         try {
             sess.capture(builder.build(), stillCallback, cameraHandler)
-            Log.i(tag, "still capture: iso=${spec.iso} shutter=${spec.exposureNs} strategy=$effectiveStrategy orientation=$orientation")
+            Log.i(tag, "still capture: iso=${spec.iso} shutter=${spec.exposureNs} strategy=$effectiveStrategy orientation=$orientation rotation=$deviceRotation")
         } catch (t: Throwable) {
             Log.e(tag, "capture failed", t)
             failCapture("Capture failed: ${t.message}")

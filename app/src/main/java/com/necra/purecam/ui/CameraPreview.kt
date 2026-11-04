@@ -43,23 +43,18 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import com.necra.purecam.core.Facing
 import com.necra.purecam.presentation.CameraSignal
-import com.necra.purecam.presentation.PreviewState
 import com.necra.purecam.presentation.CameraViewModel
 import kotlin.math.roundToInt
 
 /** TextureView supplies the sensor-oriented image; the matching stream ratio prevents stretching. */
 @Composable
 internal fun CameraPreview(
-    state: PreviewState,
     viewModel: CameraViewModel,
     onTap: ((Offset) -> Unit)? = null
 ) {
     val density = LocalDensity.current
     val focusRingSize = with(density) { 76.dp.toPx() }
-    val mirrored = state.facing == Facing.FRONT
-
     var focusPoint by remember { mutableStateOf<Offset?>(null) }
     var focusPulse by remember { mutableIntStateOf(0) }
 
@@ -89,12 +84,12 @@ internal fun CameraPreview(
                     viewModel.attachPreview(this)
                     surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                         override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                            configurePreview(mirrored)
+                            configurePreview()
                             viewModel.onPreviewSurfaceAvailable(surface)
                         }
 
                         override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
-                            configurePreview(mirrored)
+                            configurePreview()
                         }
 
                         override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
@@ -107,7 +102,7 @@ internal fun CameraPreview(
                 }
             },
             update = { view ->
-                view.configurePreview(mirrored)
+                view.configurePreview()
             }
         )
 
@@ -116,13 +111,13 @@ internal fun CameraPreview(
     }
 }
 
-/** Keeps the camera-provided sensor rotation and mirrors the front preview like a selfie view. */
+/** Keeps the camera-provided sensor rotation without applying a selfie mirror. */
 private class PreviewTextureView(context: Context) : TextureView(context) {
-    fun configurePreview(mirror: Boolean) {
+    fun configurePreview() {
         // TextureView already applies SENSOR_ORIENTATION through its SurfaceTexture matrix.
-        // Re-applying that rotation here moved the preview outside its frame.
+        // Keep the preview unmirrored and let the camera-provided orientation stand.
         setTransform(null)
-        scaleX = if (mirror) -1f else 1f
+        scaleX = 1f
         scaleY = 1f
     }
 }

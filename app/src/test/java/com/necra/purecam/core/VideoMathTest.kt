@@ -92,7 +92,7 @@ class VideoMathTest {
         assertEquals(listOf(25), VideoMath.supportedFps(listOf(25..25)))
         // Only bounded ranges: candidate rates inside them are still usable.
         assertEquals(listOf(24, 30), VideoMath.supportedFps(listOf(15..30)))
-        assertEquals(listOf(30), VideoMath.supportedFps(emptyList()))
+        assertEquals(listOf(VideoMath.DEFAULT_FPS), VideoMath.supportedFps(emptyList()))
     }
 
     @Test
@@ -100,7 +100,7 @@ class VideoMathTest {
         assertEquals(30, VideoMath.fpsFor(30, listOf(24, 30, 60)))
         assertEquals(24, VideoMath.fpsFor(25, listOf(24, 30)))
         assertEquals(60, VideoMath.fpsFor(120, listOf(30, 60)))
-        assertEquals(30, VideoMath.fpsFor(30, emptyList()))
+        assertEquals(VideoMath.DEFAULT_FPS, VideoMath.fpsFor(30, emptyList()))
     }
 
     @Test

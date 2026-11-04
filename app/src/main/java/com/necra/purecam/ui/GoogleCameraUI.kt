@@ -4,7 +4,9 @@ import android.net.Uri
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -12,7 +14,6 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -50,10 +51,11 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.necra.purecam.R
@@ -126,13 +128,14 @@ fun GoogleCameraUI(
         modifier = modifier
             .fillMaxSize()
             .background(CamBg)
+            // Keep every floating control clear of the status bar and gesture areas.
             .windowInsetsPadding(WindowInsets.safeDrawing)
     ) {
         // Viewfinder card.
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 10.dp, end = 10.dp, bottom = 88.dp)
+                .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 88.dp)
         ) {
             // Plain black card. The preview is clipped by its selected-ratio window, so no extra
             // rounded Surface layer wraps the whole viewfinder (one less layer per frame).
@@ -143,23 +146,78 @@ fun GoogleCameraUI(
                         aspect = frameAspect,
                         modifier = Modifier.align(Alignment.Center)
                     ) {
-                        content()
-                        GridOverlay(visible = state.grid)
-                        CountdownOverlay(countdown = state.countdown)
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            content()
+                            GridOverlay(visible = state.grid)
+                            CountdownOverlay(countdown = state.countdown)
+
+                            // Top scrim keeps the floating controls readable over bright scenes.
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .fillMaxWidth()
+                                    .height(110.dp)
+                                    .background(
+                                        Brush.verticalGradient(
+                                            listOf(Color.Black.copy(alpha = 0.5f), Color.Transparent)
+                                        )
+                                    )
+                            )
+
+                            // Top controls: flash + timer left, live spec in the middle, grid
+                            // right. They live inside the rounded frame so they never straddle
+                            // the viewfinder edge.
+                            Row(
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    CircleIconButton(
+                                        icon = if (flashOn) R.drawable.ic_flash_on else R.drawable.ic_flash_off,
+                                        description = stringResource(R.string.flash),
+                                        active = flashOn,
+                                        enabled = lens?.flashAvailable == true,
+                                        onClick = onFlash
+                                    )
+                                    TimerButton(timer = state.timer, onClick = onTimer)
+                                }
+                                SpecPill(text = spec, onClick = onSettings)
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
+                                ) {
+                                    CircleIconButton(
+                                        icon = R.drawable.ic_grid,
+                                        description = stringResource(R.string.grid),
+                                        active = state.grid,
+                                        onClick = onGrid
+                                    )
+                                }
+                            }
+
+                            // Recording indicator.
+                            AnimatedVisibility(
+                                visible = state.recording,
+                                modifier = Modifier.align(Alignment.TopCenter).padding(top = 60.dp),
+                                enter = fadeIn(spring(stiffness = 420f)) +
+                                    scaleIn(spring(dampingRatio = 0.72f)) +
+                                    slideInVertically(spring(stiffness = 420f)) { -it / 3 },
+                                exit = fadeOut() + scaleOut(spring(dampingRatio = 0.8f)) +
+                                    slideOutVertically { -it / 4 }
+                            ) {
+                                RecordingPill()
+                            }
+                        }
                     }
 
-                    // Scrims keep the floating controls readable over bright scenes.
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .fillMaxWidth()
-                            .height(120.dp)
-                            .background(
-                                Brush.verticalGradient(
-                                    listOf(Color.Black.copy(alpha = 0.5f), Color.Transparent)
-                                )
-                            )
-                    )
+                    // Bottom scrim stays on the card so the shutter row can sit below short
+                    // previews without losing contrast.
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
@@ -172,60 +230,13 @@ fun GoogleCameraUI(
                             )
                     )
 
-                    // Top controls: flash + timer left, live spec in the middle, grid right.
-                    Row(
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            CircleIconButton(
-                                icon = if (flashOn) R.drawable.ic_flash_on else R.drawable.ic_flash_off,
-                                description = stringResource(R.string.flash),
-                                active = flashOn,
-                                enabled = lens?.flashAvailable == true,
-                                onClick = onFlash
-                            )
-                            TimerButton(timer = state.timer, onClick = onTimer)
-                        }
-                        SpecPill(text = spec, onClick = onSettings)
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
-                        ) {
-                            CircleIconButton(
-                                icon = R.drawable.ic_grid,
-                                description = stringResource(R.string.grid),
-                                active = state.grid,
-                                onClick = onGrid
-                            )
-                        }
-                    }
-
-                    // Recording indicator.
-                    AnimatedVisibility(
-                        visible = state.recording,
-                        modifier = Modifier.align(Alignment.TopCenter).padding(top = 60.dp),
-                        enter = fadeIn(spring(stiffness = 420f)) +
-                            scaleIn(spring(dampingRatio = 0.72f)) +
-                            slideInVertically(spring(stiffness = 420f)) { -it / 3 },
-                        exit = fadeOut() + scaleOut(spring(dampingRatio = 0.8f)) + slideOutVertically { -it / 4 }
-                    ) {
-                        RecordingPill()
-                    }
-
                     // Bottom stack inside the card: lens menu + shutter row.
                     Column(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
-                            // The card is inset 10 dp; 14 more aligns these controls to the
-                            // settings/WB buttons' 24 dp screen guides.
+                            // The card is inset 10 dp; 14 more puts the gallery and flip buttons
+                            // on the same 24 dp screen guides as the settings/WB buttons.
                             .padding(horizontal = 14.dp, vertical = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
@@ -244,30 +255,35 @@ fun GoogleCameraUI(
                         }
                         if (lenses.size > 1) Spacer(Modifier.height(18.dp))
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 24.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            PhotoThumbnail(
-                                uri = state.lastPhoto,
-                                isVideo = state.lastMediaIsVideo,
-                                onClick = onOpenPhoto
-                            )
-                            Spacer(modifier = Modifier.width(24.dp))
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                PhotoThumbnail(
+                                    uri = state.lastPhoto,
+                                    isVideo = state.lastMediaIsVideo,
+                                    onClick = onOpenPhoto
+                                )
+                            }
                             ShutterButton(
                                 capturing = state.capturing,
                                 recording = state.recording || state.recordingStarting,
                                 videoMode = state.videoMode,
                                 onClick = onShutter
                             )
-                            Spacer(modifier = Modifier.width(24.dp))
-                            FlipButton(
-                                enabled = canFlip && !state.recording,
-                                rotationDegrees = state.deviceRotation,
-                                onClick = onFlip
-                            )
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.CenterEnd
+                            ) {
+                                FlipButton(
+                                    enabled = canFlip && !state.recording,
+                                    rotationDegrees = state.deviceRotation,
+                                    onClick = onFlip
+                                )
+                            }
                         }
                     }
                 }
@@ -399,33 +415,49 @@ private fun aspectRatioLabel(aspect: Float): String {
 private tailrec fun greatestCommonDivisor(a: Int, b: Int): Int =
     if (b == 0) a else greatestCommonDivisor(b, a % b)
 /**
- * Fixed-width status pill. The width never changes, so the top row stays put while the label
- * cross-fades between the WB preset and the live spec.
+ * Status pill that hugs its label. Its width springs between labels, so the top row stays
+ * centred while the WB preset and the live spec cross-fade.
  */
 @Composable
 private fun SpecPill(text: String?, onClick: () -> Unit) {
-    AnimatedContent(
-        targetState = text,
-        transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(90)) },
-        label = "specPill"
-    ) { value ->
-        Box(
-            modifier = Modifier
-                .width(124.dp)
-                .height(36.dp)
-                .clip(CircleShape)
-                .background(if (value != null) CamScrim else Color.Transparent)
-                .hapticClickable(enabled = value != null, onClick = onClick)
-                .padding(horizontal = 10.dp),
-            contentAlignment = Alignment.Center
-        ) {
+    val style = MaterialTheme.typography.titleMedium.copy(fontSize = 13.sp)
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    val contentWidth = remember(text, style, density, textMeasurer) {
+        text?.let {
+            with(density) {
+                textMeasurer.measure(it, style = style, maxLines = 1).size.width.toDp()
+            }
+        } ?: 0.dp
+    }
+    // The pill hugs the label and springs to the new width instead of reserving a fixed slot.
+    val pillWidth by animateDpAsState(
+        targetValue = if (text == null) 0.dp else contentWidth + 24.dp,
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 480f),
+        label = "specPillWidth"
+    )
+
+    Box(
+        modifier = Modifier
+            .width(pillWidth)
+            .height(34.dp)
+            .clip(CircleShape)
+            .background(if (text != null) CamScrim else Color.Transparent)
+            .hapticClickable(enabled = text != null, onClick = onClick)
+            .padding(horizontal = if (text != null) 12.dp else 0.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        AnimatedContent(
+            targetState = text,
+            transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(90)) },
+            label = "specPill"
+        ) { value ->
             if (value != null) {
                 Text(
                     text = value,
                     color = CamWhite.copy(alpha = 0.92f),
-                    style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    style = style,
+                    maxLines = 1
                 )
             }
         }
@@ -441,7 +473,8 @@ private fun ViewfinderFrame(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    val shape = RoundedCornerShape(22.dp)
+    // Matches the 36 dp top-button circles so the frame corner and button curves line up.
+    val shape = RoundedCornerShape(18.dp)
     Box(
         modifier = modifier
             .layout { measurable, constraints ->
@@ -530,13 +563,12 @@ private fun BottomBar(
         modifier = modifier
             .fillMaxWidth()
             .height(72.dp)
-            .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
+            .padding(horizontal = 24.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
-            modifier = Modifier.size(48.dp),
-            contentAlignment = Alignment.CENTER
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.CenterStart
         ) {
             BarButton(
                 icon = R.drawable.ic_settings,
@@ -545,19 +577,15 @@ private fun BottomBar(
             )
         }
 
-        Spacer(modifier = Modifier.width(24.dp))
-
         SegmentedControl(
             mode = mode,
             enabled = modeEnabled,
             onSelect = onSelectMode
         )
 
-        Spacer(modifier = Modifier.width(24.dp))
-
         Box(
-            modifier = Modifier.size(48.dp),
-            contentAlignment = Alignment.CENTER
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.CenterEnd
         ) {
             BarButton(
                 icon = R.drawable.ic_white_balance,
@@ -616,9 +644,10 @@ private fun SegmentedControl(
     ) {
         Row(
             modifier = Modifier
-                .height(48.dp),
+                .height(48.dp)
+                .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             SegmentButton(
                 icon = R.drawable.ic_camera,
@@ -660,7 +689,13 @@ private fun SegmentButton(
         animationSpec = tween(160),
         label = "segmentTint"
     )
+    // The active segment widens into a pill; both states share full rounding.
     val shape = CircleShape
+    val width by animateDpAsState(
+        targetValue = if (isSelected) 64.dp else 46.dp,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = 600f),
+        label = "modeSegmentWidth"
+    )
     val selectedScale by animateFloatAsState(
         targetValue = if (isSelected) 1f else 0.94f,
         animationSpec = spring(dampingRatio = 0.68f, stiffness = 520f),
@@ -671,7 +706,8 @@ private fun SegmentButton(
         shape = shape,
         color = backgroundColor,
         modifier = Modifier
-            .size(width = 48.dp, height = 48.dp)
+            .width(width)
+            .height(40.dp)
             .graphicsLayer { scaleX = selectedScale; scaleY = selectedScale }
             // Clip before the ripple so the pressed indication follows the pill, not a box.
             .clip(shape)

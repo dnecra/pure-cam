@@ -28,25 +28,36 @@ class OrientationMathTest {
     }
 
     @Test
-    fun jpegOrientation_backCameraSubtractsDeviceRotation() {
-        assertEquals(90, OrientationMath.jpegOrientation(90, 0, frontFacing = false))
-        assertEquals(0, OrientationMath.jpegOrientation(90, 90, frontFacing = false))
-        assertEquals(270, OrientationMath.jpegOrientation(90, 180, frontFacing = false))
-        assertEquals(180, OrientationMath.jpegOrientation(90, 270, frontFacing = false))
+    fun displayRotation_isOppositeOfPhysicalDeviceRotation() {
+        assertEquals(0, OrientationMath.displayRotation(0))
+        assertEquals(270, OrientationMath.displayRotation(90))
+        assertEquals(180, OrientationMath.displayRotation(180))
+        assertEquals(90, OrientationMath.displayRotation(270))
+        assertEquals(90, OrientationMath.displayRotation(-90))
     }
 
     @Test
-    fun jpegOrientation_frontCameraAddsDeviceRotation() {
-        assertEquals(270, OrientationMath.jpegOrientation(270, 0, frontFacing = true))
-        assertEquals(0, OrientationMath.jpegOrientation(270, 90, frontFacing = true))
-        assertEquals(180, OrientationMath.jpegOrientation(90, 90, frontFacing = true))
+    fun jpegOrientation_backCameraAddsPhysicalRotation() {
+        assertEquals(90, OrientationMath.jpegOrientation(90, 0, Facing.BACK))
+        assertEquals(180, OrientationMath.jpegOrientation(90, 90, Facing.BACK))
+        assertEquals(270, OrientationMath.jpegOrientation(90, 180, Facing.BACK))
+        assertEquals(0, OrientationMath.jpegOrientation(90, 270, Facing.BACK))
+    }
+
+    @Test
+    fun jpegOrientation_frontReversesPhysicalDeviceRotation() {
+        // Camera2 requires reversing OrientationEventListener rotation for front-facing lenses.
+        assertEquals(270, OrientationMath.jpegOrientation(270, 0, Facing.FRONT))
+        assertEquals(180, OrientationMath.jpegOrientation(270, 90, Facing.FRONT))
+        assertEquals(90, OrientationMath.jpegOrientation(270, 180, Facing.FRONT))
+        assertEquals(0, OrientationMath.jpegOrientation(270, 270, Facing.FRONT))
     }
 
     @Test
     fun jpegOrientation_normalizesOutOfRangeInputs() {
-        assertEquals(90, OrientationMath.jpegOrientation(-270, 0, frontFacing = false))
-        assertEquals(90, OrientationMath.jpegOrientation(450, 0, frontFacing = false))
-        assertEquals(180, OrientationMath.jpegOrientation(90, -90, frontFacing = false))
+        assertEquals(90, OrientationMath.jpegOrientation(-270, 0, Facing.BACK))
+        assertEquals(90, OrientationMath.jpegOrientation(450, 0, Facing.BACK))
+        assertEquals(0, OrientationMath.jpegOrientation(90, -90, Facing.BACK))
     }
 
     @Test

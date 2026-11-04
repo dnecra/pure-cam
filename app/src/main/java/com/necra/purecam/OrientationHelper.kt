@@ -13,7 +13,9 @@ class OrientationHelper(context: Context, private val onRotationChanged: (Int) -
 
     private var last = -1
 
-    private val listener = object : OrientationEventListener(context, SensorManager.SENSOR_DELAY_NORMAL) {
+    // UI-rate sampling keeps the EXIF rotation current when the shutter is pressed mid-turn;
+    // quantisation still limits callbacks to actual quarter-turn changes.
+    private val listener = object : OrientationEventListener(context, SensorManager.SENSOR_DELAY_UI) {
         override fun onOrientationChanged(orientation: Int) {
             val quantized = OrientationMath.quantizeDeviceOrientation(orientation)
             if (quantized >= 0 && quantized != last) {

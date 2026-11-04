@@ -18,8 +18,8 @@ enum class CaptureMode { PHOTO, VIDEO }
 /**
  * Minimal snapshot consumed by the live preview surface. Carried by a separate
  * [kotlinx.coroutines.flow.StateFlow] so that zoom, flash and other control changes never
- * recompose the [AndroidView] that hosts the preview — it only updates on actual
- * lens/session changes.
+ * recompose the [AndroidView] that hosts the preview — it only updates on actual lens/session
+ * changes.
  */
 data class PreviewState(
     val facing: Facing? = null

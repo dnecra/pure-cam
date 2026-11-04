@@ -33,7 +33,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -85,10 +85,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
      * zoom, capture-state, and other control changes never cause the [AndroidView] hosting
      * the [TextureView] to recompose — it only reacts to lens/session changes that actually
      * alter the framing.
+     *
+     * The selected lens is the source of truth for the selfie mirror: it changes the instant the
+     * camera switches, while the preview-ready callback can still hold the previous lens. The
+     * callback only fills in while no lens has been selected yet.
      */
-    val previewState = _previewFacing
-        .map { PreviewState(facing = it) }
-        .distinctUntilChanged()
+    val previewState = combine(_previewFacing, _uiState) { facing, ui ->
+        PreviewState(facing = ui.lens?.facing ?: facing)
+    }.distinctUntilChanged()
 
     private val _signals = MutableSharedFlow<CameraSignal>(extraBufferCapacity = 16)
     val signals = _signals.asSharedFlow()
