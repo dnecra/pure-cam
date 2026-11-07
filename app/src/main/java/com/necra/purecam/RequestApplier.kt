@@ -46,20 +46,23 @@ object RequestApplier {
             AeMode.OFF -> builder.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
             AeMode.ALWAYS_FLASH ->
                 builder.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
+            AeMode.AUTO_FLASH ->
+                builder.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON_AUTO_FLASH)
             AeMode.AUTO -> builder.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
         }
-        builder.set(
-            CaptureRequest.FLASH_MODE,
-            when {
-                spec.torch -> CameraMetadata.FLASH_MODE_TORCH
-                spec.flashSingle -> CameraMetadata.FLASH_MODE_SINGLE
-                else -> CameraMetadata.FLASH_MODE_OFF
-            }
-        )
+        when {
+            spec.torch -> builder.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_TORCH)
+            spec.flashSingle -> builder.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_SINGLE)
+            // With an AE-managed flash mode the flash is controlled by AE; writing
+            // FLASH_MODE here is ignored per the API contract and confuses some HALs,
+            // so leave it out entirely.
+            spec.aeMode == AeMode.AUTO_FLASH || spec.aeMode == AeMode.ALWAYS_FLASH -> Unit
+            else -> builder.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_OFF)
+        }
         spec.aeFps?.let {
             builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, android.util.Range(it.min, it.max))
         }
-        if (spec.aeMode == AeMode.AUTO) {
+        if (spec.aeMode != AeMode.OFF) {
             spec.exposureCompensation?.let {
                 builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, it)
             }

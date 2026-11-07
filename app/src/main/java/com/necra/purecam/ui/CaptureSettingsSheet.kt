@@ -30,6 +30,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.necra.purecam.R
 import com.necra.purecam.core.CaptureAspectMode
+import com.necra.purecam.core.OverlayStyle
+import com.necra.purecam.core.WbPreset
 import com.necra.purecam.presentation.CameraUiState
 import com.necra.purecam.presentation.CameraViewModel
 
@@ -72,6 +74,12 @@ fun CaptureSettingsSheet(
                 )
             }
 
+            Spacer(Modifier.height(16.dp))
+            WhiteBalanceSettings(state = state, viewModel = viewModel)
+
+            Spacer(Modifier.height(16.dp))
+            OverlaySettings(state = state, viewModel = viewModel)
+
             if (state.supportsVideo) {
                 Spacer(Modifier.height(16.dp))
                 Text(stringResource(R.string.video_section), style = MaterialTheme.typography.titleMedium)
@@ -96,6 +104,71 @@ fun CaptureSettingsSheet(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun WhiteBalanceSettings(
+    state: CameraUiState,
+    viewModel: CameraViewModel
+) {
+    val lens = state.lens
+    Text(stringResource(R.string.white_balance), style = MaterialTheme.typography.titleMedium)
+    Spacer(Modifier.height(4.dp))
+    Text(
+        text = stringResource(R.string.white_balance_help),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(Modifier.height(8.dp))
+
+    OptionGroup(stringResource(R.string.wb_presets)) {
+        WbPreset.CYCLE_ORDER.forEach { preset ->
+            if (lens?.awbPresets?.contains(preset) == true) {
+                val enabled = preset in state.enabledWbPresets
+                FilterChip(
+                    selected = enabled,
+                    onClick = hapticAction { viewModel.setWbPresetEnabled(preset, !enabled) },
+                    label = { Text(preset.label) }
+                )
+            }
+        }
+    }
+
+    val anyPreset = state.enabledWbPresets.any { lens?.awbPresets?.contains(it) == true }
+    if (!anyPreset) {
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = stringResource(R.string.wb_none_enabled),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun OverlaySettings(
+    state: CameraUiState,
+    viewModel: CameraViewModel
+) {
+    Text(stringResource(R.string.overlay), style = MaterialTheme.typography.titleMedium)
+    Spacer(Modifier.height(4.dp))
+    Text(
+        text = stringResource(R.string.overlay_help),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(Modifier.height(8.dp))
+
+    OptionGroup(stringResource(R.string.overlay_effects)) {
+        OverlayStyle.entries.forEach { style ->
+            val enabled = style in state.enabledOverlays
+            FilterChip(
+                selected = enabled,
+                onClick = hapticAction { viewModel.setOverlayEnabled(style, !enabled) },
+                label = { Text(style.label) }
+            )
         }
     }
 }

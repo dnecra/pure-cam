@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
+import com.necra.purecam.core.OverlayStyle
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -15,7 +16,10 @@ import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Writes the camera-produced JPEG directly to MediaStore without decoding or re-encoding it. */
+/**
+ * Writes the camera-produced JPEG to MediaStore. With no overlays selected the bytes are
+ * stored untouched; overlays are composited (and the JPEG re-encoded) on this worker thread.
+ */
 class PhotoSaver(
     private val context: Context,
     private val onSaved: (Uri, Int) -> Unit,
@@ -29,12 +33,16 @@ class PhotoSaver(
         jpeg: ByteArray,
         width: Int,
         height: Int,
-        timestamp: Long = System.currentTimeMillis()
+        timestamp: Long = System.currentTimeMillis(),
+        overlays: Set<OverlayStyle> = emptySet()
     ) {
         if (closed.get()) return
         executor.execute {
             var uri: Uri? = null
             try {
+                // Overlays re-encode the JPEG off the main thread. FilmOverlays falls back to
+                // the untouched bytes if rendering fails, so a photo is never lost.
+                val payload = FilmOverlays.apply(jpeg, overlays)
                 val now = System.currentTimeMillis()
                 val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(timestamp))
                 val values = ContentValues().apply {
@@ -53,7 +61,7 @@ class PhotoSaver(
                 uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                     ?: throw IOException("MediaStore insert returned null")
                 resolver.openOutputStream(uri)?.use { output ->
-                    output.write(jpeg)
+                    output.write(payload)
                     output.flush()
                 } ?: throw IOException("Could not open MediaStore output")
                 resolver.update(
@@ -62,7 +70,7 @@ class PhotoSaver(
                     null,
                     null
                 )
-                mainHandler.post { onSaved(uri, jpeg.size) }
+                mainHandler.post { onSaved(uri, payload.size) }
             } catch (t: Throwable) {
                 Log.e("PureCam/Save", "save failed", t)
                 if (uri != null) runCatching { context.contentResolver.delete(uri, null, null) }

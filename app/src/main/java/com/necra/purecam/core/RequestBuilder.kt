@@ -2,7 +2,7 @@ package com.necra.purecam.core
 
 enum class CaptureIntent { PREVIEW, STILL, RECORD }
 
-enum class AeMode { AUTO, ALWAYS_FLASH, OFF }
+enum class AeMode { AUTO, AUTO_FLASH, ALWAYS_FLASH, OFF }
 
 enum class AfMode { CONTINUOUS_PICTURE, AUTO, OFF }
 
@@ -70,6 +70,9 @@ object RequestBuilder {
      * @param videoFpsRange AE target range advertised by the camera, when available. Preview
      *   uses it to request the chosen video rate or the fastest safe photo-preview range.
      * @param videoMode true while the screen is in video mode; the flash becomes a steady torch.
+     * @param flashMetering true for the one-shot precapture request: the request keeps the
+     *   preview target but uses the flash-capable AE mode so the HAL can run its preflash
+     *   metering sequence. Normal preview only arms AUTO_FLASH and never forces the LED.
      */
     fun build(
         state: CameraState,
@@ -83,7 +86,8 @@ object RequestBuilder {
         videoFps: Int? = null,
         videoFpsRange: RangeI? = null,
         videoMode: Boolean = false,
-        exposureCompensation: Int? = null
+        exposureCompensation: Int? = null,
+        flashMetering: Boolean = false
     ): RequestSpec {
         val manual = state.exposure as? ExposureMode.Manual
         val useManual = manual != null && profile.supportsManualExposure
@@ -123,7 +127,18 @@ object RequestBuilder {
             useManual -> AeMode.OFF
             // Torch is a separate flash mode, so video keeps Auto exposure.
             record -> AeMode.AUTO
-            flashOn && profile.alwaysFlashSupported -> AeMode.ALWAYS_FLASH
+            !flashOn -> AeMode.AUTO
+            // The one-shot precapture request uses an AE flash mode when the device has one.
+            // Running it first lets AE meter the scene with the preflash.
+            flashMetering && profile.autoFlashSupported -> AeMode.AUTO_FLASH
+            flashMetering && profile.alwaysFlashSupported -> AeMode.ALWAYS_FLASH
+            // The repeating preview only needs to be flash-capable so the precapture handshake
+            // can run. AUTO_FLASH arms the flash without firing it on every frame; forcing
+            // ALWAYS_FLASH here would strobe the LED continuously.
+            preview -> if (profile.autoFlashSupported) AeMode.AUTO_FLASH else AeMode.AUTO
+            // Still: force the LED with FLASH_MODE_SINGLE and plain auto exposure. Per the
+            // Camera2 contract that combination guarantees the flash fires, whereas this
+            // device ignores both ALWAYS_FLASH and AUTO_FLASH for still captures.
             else -> AeMode.AUTO
         }
 
@@ -163,7 +178,7 @@ object RequestBuilder {
         val crop = AspectMath.cropRect(cropArray, outputAspect, cropZoom)
         val zoomRatio = if (useZoomRatio) {
             val range = profile.zoomRatioRange
-            range?.clamp(absoluteZoom) ?: absoluteZoom
+            range.clamp(absoluteZoom)
         } else {
             null
         }
@@ -182,7 +197,10 @@ object RequestBuilder {
         return RequestSpec(
             intent = intent,
             aeMode = ae,
-            flashSingle = !preview && !record && useManual && flashOn,
+            // Force the LED on every still capture while the flash toggle is on. This is the
+            // only combination the Camera2 contract guarantees will fire, and it works for
+            // manual exposure too because FLASH_MODE is valid when AE is OFF.
+            flashSingle = !preview && !record && flashOn,
             torch = flashOn && (record || (preview && videoMode)),
             aeFps = when {
                 videoFpsRange != null -> videoFpsRange
@@ -212,7 +230,8 @@ object RequestBuilder {
             crop = crop,
             jpegQuality = NoProcessingFlags.JPEG_QUALITY,
             thumbnailSize = NoProcessingFlags.THUMBNAIL_SIZE,
-            needPrecapture = !preview && !record && ae == AeMode.ALWAYS_FLASH,
+            needPrecapture = !preview && !record && flashOn && !useManual &&
+                (profile.alwaysFlashSupported || profile.autoFlashSupported),
             manualExposure = useManual,
             approximatePreview = approximate,
             relativeZoom = state.zoom

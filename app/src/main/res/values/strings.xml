@@ -41,4 +41,15 @@
     <string name="video_saved">Video saved to DCIM/Camera</string>
     <string name="video_unavailable">This lens cannot record video</string>
     <string name="recording_without_audio">Recording without sound</string>
+
+    <!-- White balance -->
+    <string name="white_balance">White balance</string>
+    <string name="white_balance_help">Tap the WB button to cycle through the enabled presets. Auto is always included.</string>
+    <string name="wb_presets">Presets</string>
+    <string name="wb_none_enabled">No presets enabled — the WB button will stay on Auto.</string>
+
+    <!-- Film overlay -->
+    <string name="overlay">Film overlay</string>
+    <string name="overlay_help">Procedural effects added to saved photos only. Each shot is randomised, and an overlay can be used together with any white balance.</string>
+    <string name="overlay_effects">Effects</string>
 </resources>

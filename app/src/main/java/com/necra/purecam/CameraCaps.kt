@@ -300,6 +300,7 @@ object CameraCaps {
 
         val aeModes = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES) ?: intArrayOf()
         val afModes = characteristics.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES) ?: intArrayOf()
+        val flashAvailable = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
 
         val nrModes = characteristics.get(CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES) ?: intArrayOf()
         val edgeModes = characteristics.get(CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES) ?: intArrayOf()
@@ -355,7 +356,10 @@ object CameraCaps {
             minFocusDiopters = minFocus,
             focusCalibrated = focusCalibrated,
             awbPresets = awbPresets,
-            alwaysFlashSupported = aeModes.contains(CameraMetadata.CONTROL_AE_MODE_ON_ALWAYS_FLASH),
+            alwaysFlashSupported = flashAvailable &&
+                aeModes.contains(CameraMetadata.CONTROL_AE_MODE_ON_ALWAYS_FLASH),
+            autoFlashSupported = flashAvailable &&
+                aeModes.contains(CameraMetadata.CONTROL_AE_MODE_ON_AUTO_FLASH),
             afContinuousSupported = afModes.contains(CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE),
             afAutoSupported = afModes.contains(CameraMetadata.CONTROL_AF_MODE_AUTO),
             manualSensor = manualSensor,
@@ -367,7 +371,7 @@ object CameraCaps {
             distortionOff = distortionModes.contains(CameraMetadata.DISTORTION_CORRECTION_MODE_OFF),
             videoStabilizationOff = videoStabModes.contains(CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF),
             tonemapPresetCurve = tonemapModes.contains(CameraMetadata.TONEMAP_MODE_PRESET_CURVE),
-            flashAvailable = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false,
+            flashAvailable = flashAvailable,
             maxZoom = min(5f, logicalMaxZoom.coerceAtLeast(1f)),
             zoomRatioRange = zoomRatioRange,
             colorTransform1 = characteristics.get(CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)?.toFloatArray(),

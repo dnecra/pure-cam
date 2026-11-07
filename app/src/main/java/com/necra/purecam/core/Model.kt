@@ -69,7 +69,34 @@ enum class WbPreset(val label: String, val cct: Int) {
     DAYLIGHT("Daylight", 5500),
     CLOUDY_DAYLIGHT("Cloudy", 6500),
     TWILIGHT("Twilight", 7000),
-    SHADE("Shade", 7500)
+    SHADE("Shade", 7500);
+
+    companion object {
+        /** Fixed order shared by the viewfinder WB button and the settings sheet. */
+        val CYCLE_ORDER: List<WbPreset> = listOf(
+            DAYLIGHT,
+            CLOUDY_DAYLIGHT,
+            INCANDESCENT,
+            FLUORESCENT,
+            WARM_FLUORESCENT,
+            TWILIGHT,
+            SHADE
+        )
+    }
+}
+
+/**
+ * Procedural film effects drawn onto the saved JPEG.
+ *
+ * Overlays are independent from white balance: the camera still renders a pure, calibrated
+ * capture and the chosen effects are added afterwards, with a fresh random seed per shot so
+ * no two photos look alike. They are applied to stills only; the live preview always shows
+ * the unprocessed frame.
+ */
+enum class OverlayStyle(val label: String) {
+    DUST("Dust & noise"),
+    BURN_IN("Burn-in"),
+    LIGHT_LEAK("Light leak")
 }
 
 sealed interface ExposureMode {
@@ -200,6 +227,7 @@ data class LensProfile(
     val focusCalibrated: Boolean,
     val awbPresets: Set<WbPreset>,
     val alwaysFlashSupported: Boolean,
+    val autoFlashSupported: Boolean,
     val afContinuousSupported: Boolean,
     val afAutoSupported: Boolean,
     val manualSensor: Boolean,

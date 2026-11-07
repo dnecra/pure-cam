@@ -60,8 +60,7 @@ class ManualWhiteBalanceTest {
     }
 
     @Test
-    fun interpolateMatrices_usesMiredInterpolation() {
-        val m1 = FloatArray(9) { 0.1f }
+    fun interpolateMatrices_usesMiredInterpolation() {        val m1 = FloatArray(9) { 0.1f }
         val m2 = FloatArray(9) { 0.2f }
 
         assertArrayEquals(m1, ManualWhiteBalance.interpolateMatrices(m1, m2, 6500, 3800, 6500), 1e-6f)

@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -40,17 +41,22 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -240,22 +246,38 @@ fun GoogleCameraUI(
                             .padding(horizontal = 14.dp, vertical = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+                        // Cache the last multi-lens set while the menu animates out. Flipping
+                        // to the single-lens selfie camera then shrinks the existing control
+                        // instead of swapping its chips mid-animation.
+                        var menuLenses by remember { mutableStateOf(lenses) }
+                        var menuSelectedId by remember { mutableStateOf(lens?.id) }
+                        SideEffect {
+                            if (lenses.size > 1) {
+                                menuLenses = lenses
+                                menuSelectedId = lens?.id
+                            }
+                        }
                         AnimatedVisibility(
                             visible = lenses.size > 1,
-                            enter = fadeIn(spring(stiffness = 420f)) +
-                                slideInVertically(spring(stiffness = 420f)) { it / 2 },
-                            exit = fadeOut() + slideOutVertically { it / 2 }
+                            enter = fadeIn(tween(160)),
+                            exit = fadeOut(tween(120))
                         ) {
-                            LensSegmented(
-                                lenses = lenses,
-                                selectedId = lens?.id,
-                                enabled = !busy,
-                                onSelect = onSelectLens
-                            )
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                LensSegmented(
+                                    lenses = menuLenses,
+                                    selectedId = menuSelectedId,
+                                    enabled = !busy,
+                                    onSelect = onSelectLens
+                                )
+                                Spacer(Modifier.height(18.dp))
+                            }
                         }
-                        if (lenses.size > 1) Spacer(Modifier.height(18.dp))
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                // Pull the gallery and flip buttons in from the card edges so
+                                // they sit closer to the shutter.
+                                .padding(horizontal = 30.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(
@@ -501,48 +523,92 @@ private fun LensSegmented(
     enabled: Boolean,
     onSelect: (LensProfile) -> Unit
 ) {
+    val density = LocalDensity.current
+    val chipBounds = remember { mutableStateMapOf<String, Rect>() }
+    val selectedBounds = selectedId?.let { chipBounds[it] }
+
+    // Slide the accent highlight between chips instead of fading one chip out and the next in.
+    // Bounds are measured on the chips so labels of different widths (0.6x, 1x, ...) work.
+    val highlightLeft by animateDpAsState(
+        targetValue = selectedBounds?.let { with(density) { it.left.toDp() } } ?: 0.dp,
+        animationSpec = spring(dampingRatio = 0.84f, stiffness = 650f),
+        label = "lensHighlightLeft"
+    )
+    val highlightTop by animateDpAsState(
+        targetValue = selectedBounds?.let { with(density) { it.top.toDp() } } ?: 0.dp,
+        animationSpec = spring(dampingRatio = 0.84f, stiffness = 650f),
+        label = "lensHighlightTop"
+    )
+    val highlightWidth by animateDpAsState(
+        targetValue = selectedBounds?.let { with(density) { it.width.toDp() } } ?: 0.dp,
+        animationSpec = spring(dampingRatio = 0.84f, stiffness = 650f),
+        label = "lensHighlightWidth"
+    )
+    val highlightHeight by animateDpAsState(
+        targetValue = selectedBounds?.let { with(density) { it.height.toDp() } } ?: 0.dp,
+        animationSpec = spring(dampingRatio = 0.84f, stiffness = 650f),
+        label = "lensHighlightHeight"
+    )
+
     Surface(
         shape = RoundedCornerShape(20.dp),
         color = CamBarBtn.copy(alpha = 0.25f)
     ) {
-        Row(
+        Box(
             modifier = Modifier
                 .height(36.dp)
-                .padding(3.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(3.dp)
         ) {
-            lenses.forEach { lens ->
-                val selected = lens.id == selectedId
-                val background by animateColorAsState(
-                    targetValue = if (selected) CamAccent else Color.Transparent,
-                    animationSpec = spring(dampingRatio = 0.78f, stiffness = 620f),
-                    label = "lensBg"
-                )
-                val textColor by animateColorAsState(
-                    targetValue = when {
-                        selected -> CamOnAccent
-                        !enabled -> CamMuted
-                        else -> CamWhite
-                    },
-                    animationSpec = spring(dampingRatio = 0.82f, stiffness = 700f),
-                    label = "lensText"
-                )
+            if (selectedBounds != null) {
                 Box(
                     modifier = Modifier
-                        .height(30.dp)
-                        .widthIn(min = 48.dp)
+                        .offset(x = highlightLeft, y = highlightTop)
+                        .width(highlightWidth)
+                        .height(highlightHeight)
                         .clip(RoundedCornerShape(15.dp))
-                        .background(background)
-                        .hapticClickable(enabled = enabled) { onSelect(lens) }
-                        .padding(horizontal = 12.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = lens.label,
-                        color = textColor,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
+                        .background(CamAccent)
+                )
+            }
+            Row(
+                modifier = Modifier.height(30.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                lenses.forEach { lens ->
+                    val selected = lens.id == selectedId
+                    val textColor by animateColorAsState(
+                        targetValue = when {
+                            selected -> CamOnAccent
+                            !enabled -> CamMuted
+                            else -> CamWhite
+                        },
+                        animationSpec = spring(dampingRatio = 0.82f, stiffness = 700f),
+                        label = "lensText"
                     )
+                    Box(
+                        modifier = Modifier
+                            .height(30.dp)
+                            .widthIn(min = 48.dp)
+                            .onGloballyPositioned { coords ->
+                                val position = coords.positionInParent()
+                                chipBounds[lens.id] = Rect(
+                                    left = position.x,
+                                    top = position.y,
+                                    right = position.x + coords.size.width,
+                                    bottom = position.y + coords.size.height
+                                )
+                            }
+                            .clip(RoundedCornerShape(15.dp))
+                            .hapticClickable(enabled = enabled) { onSelect(lens) }
+                            .padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = lens.label,
+                            color = textColor,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }

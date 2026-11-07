@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Bundle
+import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -59,13 +60,23 @@ class MainActivity : ComponentActivity() {
         super.onPause()
     }
 
-    /** Volume keys act as a hardware shutter, like the stock camera. */
-    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            if (event?.repeatCount == 0) cameraViewModel.onShutter()
+    /**
+     * Volume keys act as a hardware shutter, like the stock camera.
+     *
+     * Intercepting in [dispatchKeyEvent] (rather than `onKeyDown`) means a palm or finger
+     * resting anywhere on the screen cannot swallow the key before it reaches the camera.
+     * The volume UI is suppressed for both the press and the release.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                if (cameraViewModel.onShutter()) {
+                    window.decorView.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                }
+            }
             return true
         }
-        return super.onKeyDown(keyCode, event)
+        return super.dispatchKeyEvent(event)
     }
 
     private fun hasCameraPermission(): Boolean =

@@ -72,7 +72,7 @@ fun GoogleCameraScreen(
         onFlash = viewModel::toggleFlash,
         onTimer = viewModel::cycleTimer,
         onGrid = viewModel::toggleGrid,
-        onShutter = viewModel::onShutter,
+        onShutter = { viewModel.onShutter() },
         onFlip = viewModel::flipCamera,
         onOpenPhoto = onOpenPhoto,
         onSelectMode = viewModel::setCaptureMode,

@@ -39,6 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -162,9 +163,11 @@ internal fun ShutterButton(
 
 @Composable
 internal fun FlipButton(enabled: Boolean, rotationDegrees: Int, onClick: () -> Unit) {
+    // Each tap adds a half turn so the icon spins as the camera swaps front/back.
+    var turns by remember { mutableIntStateOf(0) }
     val angle by animateFloatAsState(
-        targetValue = OrientationMath.iconRotation(rotationDegrees).toFloat(),
-        animationSpec = tween(durationMillis = 220),
+        targetValue = OrientationMath.iconRotation(rotationDegrees) + 180f * turns,
+        animationSpec = tween(durationMillis = 320),
         label = "flipRotation"
     )
     Box(
@@ -173,7 +176,10 @@ internal fun FlipButton(enabled: Boolean, rotationDegrees: Int, onClick: () -> U
             .clip(CircleShape)
             .background(Color.Black.copy(alpha = 0.28f))
             .border(1.dp, Color.White.copy(alpha = 0.12f), CircleShape)
-            .hapticClickable(enabled = enabled, onClick = onClick),
+            .hapticClickable(enabled = enabled) {
+                turns += 1
+                onClick()
+            },
         contentAlignment = Alignment.Center
     ) {
         Icon(

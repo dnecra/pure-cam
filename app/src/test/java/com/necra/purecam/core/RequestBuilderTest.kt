@@ -21,7 +21,8 @@ class RequestBuilderTest {
         fallbackTransform: FloatArray? = null,
         videoFps: Int? = null,
         videoFpsRange: RangeI? = null,
-        videoMode: Boolean = false
+        videoMode: Boolean = false,
+        flashMetering: Boolean = false
     ): RequestSpec = RequestBuilder.build(
         state = state,
         profile = state.lens,
@@ -33,7 +34,8 @@ class RequestBuilderTest {
         fallbackTransform = fallbackTransform,
         videoFps = videoFps,
         videoFpsRange = videoFpsRange,
-        videoMode = videoMode
+        videoMode = videoMode,
+        flashMetering = flashMetering
     )
 
     @Test
@@ -99,10 +101,64 @@ class RequestBuilderTest {
         val still = build(state)
         val preview = build(state, intent = CaptureIntent.PREVIEW)
 
-        assertEquals(AeMode.ALWAYS_FLASH, still.aeMode)
+        // AUTO_FLASH is only used for the precapture handshake; the still request forces the
+        // LED with FLASH_MODE_SINGLE and plain auto exposure, which every HAL honours.
+        assertEquals(AeMode.AUTO, still.aeMode)
         assertTrue(still.needPrecapture)
-        assertFalse(still.flashSingle)
+        assertTrue(still.flashSingle)
+        // Preview only arms AUTO_FLASH for the precapture handshake; it never forces the LED.
+        assertEquals(AeMode.AUTO_FLASH, preview.aeMode)
         assertFalse(preview.needPrecapture)
+    }
+
+    @Test
+    fun autoFlashFallbackIsUsedWhenAlwaysFlashIsUnavailable() {
+        val profile = TestProfiles.lens(alwaysFlashSupported = false, autoFlashSupported = true)
+        val state = TestProfiles.autoState(profile, flash = true)
+
+        val still = build(state)
+        val preview = build(state, intent = CaptureIntent.PREVIEW)
+
+        assertEquals(AeMode.AUTO, still.aeMode)
+        assertTrue(still.needPrecapture)
+        assertTrue(still.flashSingle)
+        assertEquals(AeMode.AUTO_FLASH, preview.aeMode)
+    }
+
+    @Test
+    fun precaptureUsesFlashAeModeOnEveryDevice() {
+        val autoOnly = TestProfiles.lens(alwaysFlashSupported = false, autoFlashSupported = true)
+        val alwaysOnly = TestProfiles.lens(alwaysFlashSupported = true, autoFlashSupported = false)
+
+        assertEquals(
+            AeMode.AUTO_FLASH,
+            build(
+                TestProfiles.autoState(autoOnly, flash = true),
+                intent = CaptureIntent.PREVIEW,
+                flashMetering = true
+            ).aeMode
+        )
+        assertEquals(
+            AeMode.ALWAYS_FLASH,
+            build(
+                TestProfiles.autoState(alwaysOnly, flash = true),
+                intent = CaptureIntent.PREVIEW,
+                flashMetering = true
+            ).aeMode
+        )
+    }
+
+    @Test
+    fun flashWithoutAnyFlashAeModeFallsBackToPlainAuto() {
+        val profile = TestProfiles.lens(alwaysFlashSupported = false, autoFlashSupported = false)
+        val state = TestProfiles.autoState(profile, flash = true)
+
+        val still = build(state)
+
+        assertEquals(AeMode.AUTO, still.aeMode)
+        assertFalse(still.needPrecapture)
+        // Without any AE flash mode the LED is forced directly on the still request.
+        assertTrue(still.flashSingle)
     }
 
     @Test
@@ -155,12 +211,12 @@ class RequestBuilderTest {
         val spec = build(state)
 
         // Manual exposure is unavailable, but auto exposure with flash still works.
-        assertEquals(AeMode.ALWAYS_FLASH, spec.aeMode)
+        assertEquals(AeMode.AUTO, spec.aeMode)
         assertNull(spec.iso)
         assertNull(spec.exposureNs)
         assertNull(spec.postRawBoost)
         assertFalse(spec.manualExposure)
-        assertFalse(spec.flashSingle)
+        assertTrue(spec.flashSingle)
     }
 
     @Test
@@ -422,7 +478,7 @@ class RequestBuilderTest {
 
         assertTrue(preview.torch)
         assertFalse(still.torch)
-        assertFalse(still.flashSingle)
+        assertTrue(still.flashSingle)
     }
 
     @Test

@@ -12,6 +12,8 @@ import com.necra.purecam.core.SizeI
 import com.necra.purecam.core.VideoConfig
 import com.necra.purecam.core.VideoMath
 import com.necra.purecam.core.VideoQuality
+import com.necra.purecam.core.OverlayStyle
+import com.necra.purecam.core.WbPreset
 
 enum class CaptureMode { PHOTO, VIDEO }
 
@@ -52,6 +54,10 @@ data class CameraUiState(
     val videoQuality: VideoQuality = VideoQuality.FHD_1080P,
     val videoFps: Int = VideoMath.DEFAULT_FPS,
     val aspectMode: CaptureAspectMode = CaptureAspectMode.PORTRAIT_9_16,
+    /** Hardware WB presets included when the viewfinder WB button cycles. */
+    val enabledWbPresets: Set<WbPreset> = setOf(WbPreset.DAYLIGHT),
+    /** Procedural film overlays drawn onto saved stills. Independent from WB. */
+    val enabledOverlays: Set<OverlayStyle> = emptySet(),
     val audioGranted: Boolean = false
 ) {
     val lens: LensProfile? get() = cameraState?.lens

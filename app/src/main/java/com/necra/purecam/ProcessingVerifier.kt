@@ -190,6 +190,8 @@ object ProcessingVerifier {
             append("TONEMAP=${modeName(result.get(CaptureResult.TONEMAP_MODE))} ")
             append("CCM=${ccmName(result.get(CaptureResult.COLOR_CORRECTION_MODE))} ")
             append("AE=${aeName(result.get(CaptureResult.CONTROL_AE_MODE))} ")
+            append("FLASH=${flashName(result.get(CaptureResult.FLASH_STATE))} ")
+            append("AESTATE=${aeStateName(result.get(CaptureResult.CONTROL_AE_STATE))} ")
             append("ISO=$iso SHUTTER=$shutter FOCUS=$focus ")
             append("AF=${afName(result.get(CaptureResult.CONTROL_AF_MODE))} ")
             append("AWB=${awbName(result.get(CaptureResult.CONTROL_AWB_MODE))} ")
@@ -221,6 +223,27 @@ object ProcessingVerifier {
         CameraMetadata.CONTROL_AE_MODE_ON_ALWAYS_FLASH -> "ALWAYS_FLASH"
         CameraMetadata.CONTROL_AE_MODE_ON_AUTO_FLASH_REDEYE -> "AUTO_FLASH_REDEYE"
         CameraMetadata.CONTROL_AE_MODE_ON_EXTERNAL_FLASH -> "EXTERNAL_FLASH"
+        else -> value.toString()
+    }
+
+    private fun flashName(value: Int?): String = when (value) {
+        null -> "?"
+        CameraMetadata.FLASH_STATE_UNAVAILABLE -> "UNAVAILABLE"
+        CameraMetadata.FLASH_STATE_CHARGING -> "CHARGING"
+        CameraMetadata.FLASH_STATE_READY -> "READY"
+        CameraMetadata.FLASH_STATE_FIRED -> "FIRED"
+        CameraMetadata.FLASH_STATE_PARTIAL -> "PARTIAL"
+        else -> value.toString()
+    }
+
+    private fun aeStateName(value: Int?): String = when (value) {
+        null -> "?"
+        CameraMetadata.CONTROL_AE_STATE_INACTIVE -> "INACTIVE"
+        CameraMetadata.CONTROL_AE_STATE_SEARCHING -> "SEARCHING"
+        CameraMetadata.CONTROL_AE_STATE_CONVERGED -> "CONVERGED"
+        CameraMetadata.CONTROL_AE_STATE_LOCKED -> "LOCKED"
+        CameraMetadata.CONTROL_AE_STATE_FLASH_REQUIRED -> "FLASH_REQUIRED"
+        CameraMetadata.CONTROL_AE_STATE_PRECAPTURE -> "PRECAPTURE"
         else -> value.toString()
     }
 

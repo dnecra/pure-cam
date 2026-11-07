@@ -6,6 +6,7 @@ import com.necra.purecam.core.CaptureAspectMode
 import com.necra.purecam.core.VideoMath
 import com.necra.purecam.core.VideoQuality
 import com.necra.purecam.core.WbPreset
+import com.necra.purecam.core.OverlayStyle
 import com.necra.purecam.core.WhiteBalanceMode
 import com.necra.purecam.presentation.CaptureMode
 import com.necra.purecam.presentation.TimerMode
@@ -81,6 +82,37 @@ class UiPreferences(context: Context) {
             edit.apply()
         }
 
+    /**
+     * Hardware presets the viewfinder WB button cycles through. Missing key means the
+     * minimal default (Auto + Daylight); an explicitly empty set means Auto only.
+     */
+    var enabledWbPresets: Set<WbPreset>
+        get() {
+            val stored = prefs.getStringSet(KEY_ENABLED_WB_PRESETS, null)
+                ?: return DEFAULT_ENABLED_WB_PRESETS
+            return stored.mapNotNull { name ->
+                runCatching { WbPreset.valueOf(name) }.getOrNull()
+            }.toSet()
+        }
+        set(value) = prefs.edit()
+            .putStringSet(KEY_ENABLED_WB_PRESETS, value.map { it.name }.toSet())
+            .apply()
+
+    /**
+     * Procedural film effects applied to saved stills. Independent from the white-balance
+     * preset, so both can be active at once. Empty by default (pure photos).
+     */
+    var enabledOverlays: Set<OverlayStyle>
+        get() {
+            val stored = prefs.getStringSet(KEY_ENABLED_OVERLAYS, null) ?: return emptySet()
+            return stored.mapNotNull { name ->
+                runCatching { OverlayStyle.valueOf(name) }.getOrNull()
+            }.toSet()
+        }
+        set(value) = prefs.edit()
+            .putStringSet(KEY_ENABLED_OVERLAYS, value.map { it.name }.toSet())
+            .apply()
+
     private companion object {
         const val KEY_GRID = "grid"
         const val KEY_TIMER = "timer"
@@ -93,8 +125,11 @@ class UiPreferences(context: Context) {
         const val KEY_WB_MODE = "white_balance_mode"
         const val KEY_WB_PRESET = "white_balance_preset"
         const val KEY_WB_KELVIN = "white_balance_kelvin"
+        const val KEY_ENABLED_WB_PRESETS = "enabled_wb_presets"
+        const val KEY_ENABLED_OVERLAYS = "enabled_overlays"
         const val WB_AUTO = "auto"
         const val WB_PRESET = "preset"
         const val WB_KELVIN = "kelvin"
+        val DEFAULT_ENABLED_WB_PRESETS = setOf(WbPreset.DAYLIGHT)
     }
 }

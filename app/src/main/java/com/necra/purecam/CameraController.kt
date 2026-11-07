@@ -10,6 +10,7 @@ import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureFailure
 import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
@@ -37,6 +38,7 @@ import com.necra.purecam.core.LensMode
 import com.necra.purecam.core.LensProfile
 import com.necra.purecam.core.ManualWhiteBalance
 import com.necra.purecam.core.OrientationMath
+import com.necra.purecam.core.OverlayStyle
 import com.necra.purecam.core.RangeI
 import com.necra.purecam.core.RequestBuilder
 import com.necra.purecam.core.RequestSpec
@@ -50,6 +52,12 @@ import kotlin.math.roundToInt
 private const val READOUT_INTERVAL_MS = 200L
 /** Coalesce pinch updates at up to 120 Hz without rebuilding requests for every pointer event. */
 private const val ZOOM_REQUEST_INTERVAL_MS = 8L
+/**
+ * How long to wait for AE to report PRECAPTURE before accepting a settled state anyway.
+ * Most HALs enter PRECAPTURE within a few frames; this only covers devices that don't
+ * expose the intermediate state.
+ */
+private const val PRECAPTURE_ENTER_TIMEOUT_MS = 900L
 
 class CameraController(
     private val context: Context,
@@ -114,6 +122,10 @@ class CameraController(
     @Volatile
     private var captureAspectMode = CaptureAspectMode.PORTRAIT_9_16
 
+    /** Procedural film effects applied to the saved still; never touches the camera pipeline. */
+    @Volatile
+    private var overlayStyles: Set<OverlayStyle> = emptySet()
+
     private var surfaceReady = false
     private var previewSurface: Surface? = null
     private var reader: ImageReader? = null
@@ -138,6 +150,16 @@ class CameraController(
 
     private var capturing = false
     private var pending: PendingCapture? = null
+    /**
+     * Flash precapture handshake phase:
+     * 0 = idle, 1 = trigger sent and waiting for AE to enter PRECAPTURE,
+     * 2 = preflash observed and waiting for it to finish.
+     */
+    private var precapturePhase = 0
+    /** Wall clock when the precapture trigger was submitted, for the compatibility fallback. */
+    private var precaptureTriggerMs = 0L
+    /** Throttles the settling debug log so a long preflash does not flood logcat. */
+    private var lastSettleKey: String? = null
     private var stillSpec: RequestSpec? = null
     private var stillLens: LensProfile? = null
     private var captureWatchdog: Runnable? = null
@@ -255,6 +277,10 @@ class CameraController(
 
     fun setDeviceRotation(degrees: Int) {
         deviceRotation = OrientationMath.normalizeDegrees(degrees)
+    }
+
+    fun setOverlays(styles: Set<OverlayStyle>) {
+        overlayStyles = styles
     }
 
     fun setCaptureAspectMode(mode: CaptureAspectMode) {
@@ -472,7 +498,10 @@ class CameraController(
 
             val builder = buildPreviewRequest() ?: return@post
             builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_START)
-            if (s.exposure is ExposureMode.Auto) {
+            // AE precapture is useful for metering the tapped spot, but with the flash armed
+            // it makes the HAL run its preflash sequence, so the LED would blink every time
+            // the user taps the viewfinder. Keep it for plain (flash-off) auto exposure only.
+            if (s.exposure is ExposureMode.Auto && !s.flash) {
                 builder.set(
                     CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
                     CameraMetadata.CONTROL_AE_PRECAPTURE_TRIGGER_START
@@ -1020,8 +1049,8 @@ class CameraController(
 
     // ---------------------------------------------------------------- preview requests
 
-    private fun buildPreviewRequest(): CaptureRequest.Builder? = try {
-        buildPreviewRequestUnchecked()
+    private fun buildPreviewRequest(flashMetering: Boolean = false): CaptureRequest.Builder? = try {
+        buildPreviewRequestUnchecked(flashMetering)
     } catch (t: Throwable) {
         // A single bad request key must never take down the camera thread; fall back to the
         // last working repeating request until the state changes again.
@@ -1029,7 +1058,7 @@ class CameraController(
         null
     }
 
-    private fun buildPreviewRequestUnchecked(): CaptureRequest.Builder? {
+    private fun buildPreviewRequestUnchecked(flashMetering: Boolean): CaptureRequest.Builder? {
         val s = state ?: return null
         val plan = currentPlan ?: return null
         val d = device ?: return null
@@ -1054,7 +1083,8 @@ class CameraController(
             videoFps = requestedVideoFps,
             videoFpsRange = previewFpsRange?.let { RangeI(it.first, it.last) },
             videoMode = videoMode,
-            exposureCompensation = exposureCompensationSteps
+            exposureCompensation = exposureCompensationSteps,
+            flashMetering = flashMetering
         )
         val builder = d.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
         builder.addTarget(surface)
@@ -1137,31 +1167,25 @@ class CameraController(
         val manualShutter = (s.exposure as? ExposureMode.Manual)?.shutterNs
         mainHandler.post { listener.onCaptureStarted(manualShutter) }
 
-        val needAe = s.exposure is ExposureMode.Auto && s.flash && s.lens.alwaysFlashSupported
+        val needAe = s.exposure is ExposureMode.Auto && s.flash && s.lens.flashAvailable &&
+            (s.lens.alwaysFlashSupported || s.lens.autoFlashSupported)
         val needLens = s.focus is FocusMode.Manual
         val now = SystemClock.elapsedRealtime()
         val deadline = now + when {
-            needAe -> 1_600L
+            // A flash precapture needs the preflash to meter the scene and the flash unit to
+            // recharge before the main flash. Slow HALs regularly need more than 1.6 s.
+            needAe -> 2_500L
             needLens -> 1_100L
             else -> 0L
         }
         // Continuous autofocus keeps working on the preview stream. Don't add shutter lag by
         // waiting for its passive AF state to change; capture with the current focus position.
         pending = PendingCapture(needAe, needLens, now, deadline)
+        precapturePhase = if (needAe) 1 else 0
+        lastSettleKey = null
 
         if (needAe) {
-            val builder = buildPreviewRequest()
-            if (builder != null) {
-                builder.set(
-                    CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
-                    CameraMetadata.CONTROL_AE_PRECAPTURE_TRIGGER_START
-                )
-                try {
-                    session?.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
-                } catch (t: Throwable) {
-                    Log.w(tag, "precapture request failed", t)
-                }
-            }
+            startFlashPrecapture()
         } else {
             // With AE precapture running there is nothing useful to check until a fresh result
             // arrives, so only try an immediate capture when no settling is required.
@@ -1178,21 +1202,136 @@ class CameraController(
         }
     }
 
-    private fun maybeFireCapture(force: Boolean) {
+    /**
+     * Starts the AE precapture sequence with a single one-shot request.
+     *
+     * The repeating preview already runs in a flash-capable AE mode while the flash is on,
+     * which arms the flash without firing it. Only the one-shot request carries the START
+     * trigger; replacing the repeating request at the same time (as the old code did) resets
+     * the handshake, so AE never settled and the shot was released at the wrong moment.
+     */
+    private fun startFlashPrecapture() {
+        val sess = session ?: return
+        val capture = pending ?: return
+        val start = buildPreviewRequest(flashMetering = true) ?: return
+        start.set(
+            CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
+            CameraMetadata.CONTROL_AE_PRECAPTURE_TRIGGER_START
+        )
+        val callback = object : CameraCaptureSession.CaptureCallback() {
+            override fun onCaptureProgressed(
+                session: CameraCaptureSession,
+                request: CaptureRequest,
+                partialResult: CaptureResult
+            ) {
+                if (pending === capture) {
+                    maybeFireCapture(false, null, partialResult.get(CaptureResult.CONTROL_AE_STATE))
+                }
+            }
+
+            override fun onCaptureCompleted(
+                session: CameraCaptureSession,
+                request: CaptureRequest,
+                result: TotalCaptureResult
+            ) {
+                // Feed the fresh result through so a settled AE state can fire immediately.
+                if (pending === capture) maybeFireCapture(false, result)
+            }
+
+            override fun onCaptureFailed(
+                session: CameraCaptureSession,
+                request: CaptureRequest,
+                failure: CaptureFailure
+            ) {
+                Log.w(tag, "precapture failed: reason=${failure.reason}")
+            }
+        }
+        try {
+            precaptureTriggerMs = SystemClock.elapsedRealtime()
+            sess.capture(start.build(), callback, cameraHandler)
+        } catch (t: Throwable) {
+            Log.w(tag, "precapture request failed", t)
+        }
+    }
+
+    private fun maybeFireCapture(
+        force: Boolean,
+        result: TotalCaptureResult? = null,
+        aeStateOverride: Int? = null
+    ) {
         val p = pending ?: return
         if (!capturing) return
-        // A result from before this capture started says nothing about the current exposure.
-        val r = latestReadout?.takeIf { it.timestampMs >= p.startedMs }
-        val aeReady = !p.needAe || r?.aeState == CameraMetadata.CONTROL_AE_STATE_CONVERGED ||
-            r?.aeState == CameraMetadata.CONTROL_AE_STATE_LOCKED
-        val lensReady = !p.needLens || r?.lensState == CameraMetadata.LENS_STATE_STATIONARY
+        val aeState = aeStateOverride
+            ?: result?.get(CaptureResult.CONTROL_AE_STATE)
+            ?: latestReadout?.aeState
+        val lensState = result?.get(CaptureResult.LENS_STATE) ?: latestReadout?.lensState
+        val flashState = result?.get(CaptureResult.FLASH_STATE) ?: latestReadout?.flashState
+        // Follow the documented precapture handshake: wait until AE reports that it is running
+        // the preflash sequence (PRECAPTURE), then wait for it to leave that state. Firing on
+        // the first "flash required" result (as the old code did) released the shutter while
+        // the preflash was still charging, so the main flash never had time to fire.
+        if (p.needAe && precapturePhase == 1 && aeState == CameraMetadata.CONTROL_AE_STATE_PRECAPTURE) {
+            precapturePhase = 2
+            Log.i(tag, "precapture: preflash metering started")
+        }
+        val settled = aeState == CameraMetadata.CONTROL_AE_STATE_CONVERGED ||
+            aeState == CameraMetadata.CONTROL_AE_STATE_LOCKED ||
+            aeState == CameraMetadata.CONTROL_AE_STATE_FLASH_REQUIRED
+        val aeReady = if (!p.needAe) {
+            true
+        } else {
+            when (precapturePhase) {
+                2 -> aeState == null || aeState != CameraMetadata.CONTROL_AE_STATE_PRECAPTURE
+                1 -> {
+                    // Some devices never expose PRECAPTURE and jump straight to a settled
+                    // post-preflash state. After a sensible waiting period accept that.
+                    val waited = SystemClock.elapsedRealtime() - precaptureTriggerMs
+                    waited >= PRECAPTURE_ENTER_TIMEOUT_MS && settled
+                }
+                else -> false
+            }
+        }
+        val lensReady = !p.needLens || lensState == CameraMetadata.LENS_STATE_STATIONARY
         val timedOut = SystemClock.elapsedRealtime() >= p.deadlineMs
+        if (capturing) {
+            val settleKey = "$precapturePhase/$aeState/$flashState/$aeReady/$timedOut"
+            if (settleKey != lastSettleKey) {
+                lastSettleKey = settleKey
+                Log.d(
+                    tag,
+                    "settle phase=$precapturePhase ae=${aeStateName(aeState)} " +
+                        "flash=${flashStateName(flashState)} ready=$aeReady lens=$lensReady " +
+                        "timedOut=$timedOut"
+                )
+            }
+        }
         if (force || timedOut || (aeReady && lensReady)) {
             if (force && !(aeReady && lensReady)) {
                 Log.w(tag, "capture settling timed out; firing anyway (ae=$aeReady lens=$lensReady)")
             }
             fireCapture()
         }
+    }
+
+    private fun aeStateName(state: Int?): String = when (state) {
+        null -> "?"
+        CameraMetadata.CONTROL_AE_STATE_INACTIVE -> "INACTIVE"
+        CameraMetadata.CONTROL_AE_STATE_SEARCHING -> "SEARCHING"
+        CameraMetadata.CONTROL_AE_STATE_CONVERGED -> "CONVERGED"
+        CameraMetadata.CONTROL_AE_STATE_LOCKED -> "LOCKED"
+        CameraMetadata.CONTROL_AE_STATE_FLASH_REQUIRED -> "FLASH_REQUIRED"
+        CameraMetadata.CONTROL_AE_STATE_PRECAPTURE -> "PRECAPTURE"
+        else -> state.toString()
+    }
+
+    private fun flashStateName(state: Int?): String = when (state) {
+        null -> "?"
+        CameraMetadata.FLASH_STATE_UNAVAILABLE -> "UNAVAILABLE"
+        CameraMetadata.FLASH_STATE_CHARGING -> "CHARGING"
+        CameraMetadata.FLASH_STATE_READY -> "READY"
+        CameraMetadata.FLASH_STATE_FIRED -> "FIRED"
+        CameraMetadata.FLASH_STATE_PARTIAL -> "PARTIAL"
+        else -> state.toString()
     }
 
     private fun fireCapture() {
@@ -1244,7 +1383,7 @@ class CameraController(
 
         try {
             sess.capture(builder.build(), stillCallback, cameraHandler)
-            Log.i(tag, "still capture: iso=${spec.iso} shutter=${spec.exposureNs} strategy=$effectiveStrategy orientation=$orientation rotation=$deviceRotation")
+            Log.i(tag, "still capture: iso=${spec.iso} shutter=${spec.exposureNs} ae=${spec.aeMode} flashSingle=${spec.flashSingle} flashState=${flashStateName(latestReadout?.flashState)} strategy=$effectiveStrategy orientation=$orientation rotation=$deviceRotation")
         } catch (t: Throwable) {
             Log.e(tag, "capture failed", t)
             failCapture("Capture failed: ${t.message}")
@@ -1262,6 +1401,7 @@ class CameraController(
         removeCaptureRunnables()
         capturing = false
         pending = null
+        precapturePhase = 0
         // Keep stillSpec/stillLens: the TotalCaptureResult may arrive after the JPEG callback.
         // They are cleared when the next capture starts or when the session is torn down.
         if (device != null && session != null) applyPreview()
@@ -1379,7 +1519,7 @@ class CameraController(
     }
 
     private fun handleResult(result: TotalCaptureResult) {
-        if (capturing) maybeFireCapture(false)
+        if (capturing) maybeFireCapture(false, result)
         // The readout is only needed when the manual controls ask for a starting value, so
         // sample it a few times a second instead of allocating on every preview frame.
         val now = SystemClock.elapsedRealtime()
@@ -1412,7 +1552,7 @@ class CameraController(
             // seconds on a busy device, so stop it here; saving reports its own result.
             captureWatchdog?.let { cameraHandler.removeCallbacks(it) }
             captureWatchdog = null
-            saver.save(bytes, image.width, image.height)
+            saver.save(bytes, image.width, image.height, overlays = overlayStyles)
             // The camera is ready for the next frame now. Let the independent save worker finish
             // writing the original JPEG without keeping the shutter UI in a busy state.
             finishCapture(null, null)

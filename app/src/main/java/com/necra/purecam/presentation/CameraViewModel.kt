@@ -24,6 +24,7 @@ import com.necra.purecam.core.LensProfile
 import com.necra.purecam.core.VideoConfig
 import com.necra.purecam.core.VideoMath
 import com.necra.purecam.core.VideoQuality
+import com.necra.purecam.core.OverlayStyle
 import com.necra.purecam.core.WbPreset
 import com.necra.purecam.core.WhiteBalanceMode
 import com.necra.purecam.data.UiPreferences
@@ -39,17 +40,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
-
-/** Fixed white-balance cycle order; presets the active lens does not advertise are skipped. */
-private val WB_CYCLE = listOf(
-    WbPreset.DAYLIGHT,
-    WbPreset.CLOUDY_DAYLIGHT,
-    WbPreset.INCANDESCENT,
-    WbPreset.FLUORESCENT,
-    WbPreset.WARM_FLUORESCENT,
-    WbPreset.TWILIGHT,
-    WbPreset.SHADE
-)
 
 /**
  * Owns the camera session and turns user intents into [CameraUiState] snapshots.
@@ -74,6 +64,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
             videoQuality = prefs.videoQuality,
             videoFps = prefs.videoFps,
             aspectMode = prefs.aspectMode,
+            enabledWbPresets = prefs.enabledWbPresets,
+            enabledOverlays = prefs.enabledOverlays,
             audioGranted = hasAudioPermission()
         )
     )
@@ -121,6 +113,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
             it.setVideoMode(_uiState.value.videoMode)
             it.setCaptureAspectMode(_uiState.value.aspectMode)
             it.setDeviceRotation(_uiState.value.deviceRotation)
+            it.setOverlays(_uiState.value.enabledOverlays)
         }
         startIfAllowed()
     }
@@ -287,38 +280,72 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     }
 
     /**
-     * Cycles Auto → the lens's white-balance presets → Auto. Only presets the lens advertises
-     * are offered, and the order is fixed so repeated taps are predictable.
+     * Cycles Auto → the enabled hardware presets → Auto. Only presets the lens advertises
+     * (and the user enabled in Settings) are offered, in a fixed order so repeated taps are
+     * predictable.
      */
     fun cycleWhiteBalance() {
-        val s = _uiState.value.cameraState ?: return
-        val available = WB_CYCLE.filter { s.lens.awbPresets.contains(it) }
-        if (available.isEmpty()) return
+        val state = _uiState.value
+        val s = state.cameraState ?: return
+        val options = wbCycleOptions(s.lens, state)
         val next = when (val current = s.wb) {
-            is WhiteBalanceMode.Auto -> WhiteBalanceMode.Preset(available.first())
-            is WhiteBalanceMode.Preset -> {
-                val index = available.indexOf(current.preset)
-                if (index in 0 until available.lastIndex) {
-                    WhiteBalanceMode.Preset(available[index + 1])
-                } else {
-                    WhiteBalanceMode.Auto
+            is WhiteBalanceMode.Auto -> options.firstOrNull() ?: WhiteBalanceMode.Auto
+            else -> {
+                val index = options.indexOf(current)
+                when {
+                    index == -1 -> options.firstOrNull() ?: WhiteBalanceMode.Auto
+                    index == options.lastIndex -> WhiteBalanceMode.Auto
+                    else -> options[index + 1]
                 }
             }
-            is WhiteBalanceMode.Kelvin -> WhiteBalanceMode.Auto
         }
+        if (next == s.wb) return
         controller?.setWhiteBalance(next)
         prefs.whiteBalance = next
     }
+
+    /** Enables or disables a hardware preset in the viewfinder WB button cycle. */
+    fun setWbPresetEnabled(preset: WbPreset, enabled: Boolean) {
+        val s = _uiState.value.cameraState ?: return
+        if (!s.lens.awbPresets.contains(preset)) return
+        val current = _uiState.value.enabledWbPresets
+        val next = if (enabled) current + preset else current - preset
+        if (next == current) return
+        prefs.enabledWbPresets = next
+        _uiState.update { it.copy(enabledWbPresets = next) }
+        if (!enabled && (s.wb as? WhiteBalanceMode.Preset)?.preset == preset) setWhiteBalanceAuto()
+    }
+
+    /** Enables or disables a procedural film overlay applied to saved stills. */
+    fun setOverlayEnabled(style: OverlayStyle, enabled: Boolean) {
+        val current = _uiState.value.enabledOverlays
+        val next = if (enabled) current + style else current - style
+        if (next == current) return
+        prefs.enabledOverlays = next
+        _uiState.update { it.copy(enabledOverlays = next) }
+        controller?.setOverlays(next)
+    }
+
+    private fun wbCycleOptions(lens: LensProfile, state: CameraUiState): List<WhiteBalanceMode> =
+        WbPreset.CYCLE_ORDER
+            .filter { lens.awbPresets.contains(it) && it in state.enabledWbPresets }
+            .map { WhiteBalanceMode.Preset(it) }
 
     /** Exposure compensation in EV, applied on top of auto exposure. */
     fun setExposureCompensation(ev: Float) {
         controller?.setExposureCompensation(ev)
     }
 
-    fun onShutter() {
+    /**
+     * Shutter intent shared by the on-screen button and the volume keys.
+     *
+     * @return true when the intent was accepted (a shot, countdown or recording transition
+     *   actually started), so the hardware shutter can give feedback only for real actions.
+     */
+    fun onShutter(): Boolean {
         if (_uiState.value.countdown != null) {
             cancelCountdown()
-            return
+            return true
         }
         if (_uiState.value.videoMode) {
             if (_uiState.value.recording || _uiState.value.recordingStarting) {
@@ -326,11 +353,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
             } else {
                 requestRecording()
             }
-            return
+            return true
         }
-        if (_uiState.value.capturing) return
+        if (_uiState.value.capturing) return false
+        val c = controller ?: return false
         val seconds = _uiState.value.timer.seconds
-        if (seconds == 0) controller?.capture() else startCountdown(seconds)
+        if (seconds == 0) c.capture() else startCountdown(seconds)
+        return true
     }
 
     /**
