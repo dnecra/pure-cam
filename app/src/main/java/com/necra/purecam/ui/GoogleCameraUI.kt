@@ -79,8 +79,6 @@ import kotlin.math.abs
 private val CamBg = Color(0xFF000000)
 private val CamScrim = Color(0x99202124)
 private val CamBarBtn = Color(0xFF2B2B2D)
-private val CamAccent = Color(0xFFA8C7FA)
-private val CamOnAccent = Color(0xFF041E49)
 private val CamWhite = Color(0xFFFFFFFF)
 private val CamMuted = Color(0xFF8E8E93)
 
@@ -338,14 +336,14 @@ private fun CircleIconButton(
     val tint by animateColorAsState(
         targetValue = when {
             !enabled -> CamWhite.copy(alpha = 0.35f)
-            active -> CamOnAccent
+            active -> MaterialTheme.colorScheme.onPrimary
             else -> CamWhite
         },
         animationSpec = tween(160),
         label = "circleIconTint"
     )
     val background by animateColorAsState(
-        targetValue = if (active) CamAccent else CamScrim,
+        targetValue = if (active) MaterialTheme.colorScheme.primary else CamScrim,
         animationSpec = tween(160),
         label = "circleIconBg"
     )
@@ -377,7 +375,7 @@ private fun TimerButton(timer: TimerMode, onClick: () -> Unit) {
         modifier = Modifier
             .size(36.dp)
             .clip(CircleShape)
-            .background(if (label == null) CamScrim else CamAccent)
+            .background(if (label == null) CamScrim else MaterialTheme.colorScheme.primary)
             .hapticClickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -391,7 +389,7 @@ private fun TimerButton(timer: TimerMode, onClick: () -> Unit) {
         } else {
             Text(
                 text = label,
-                color = CamOnAccent,
+                color = MaterialTheme.colorScheme.onPrimary,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold
             )
@@ -566,7 +564,7 @@ private fun LensSegmented(
                         .width(highlightWidth)
                         .height(highlightHeight)
                         .clip(RoundedCornerShape(15.dp))
-                        .background(CamAccent)
+                        .background(MaterialTheme.colorScheme.primary)
                 )
             }
             Row(
@@ -577,7 +575,7 @@ private fun LensSegmented(
                     val selected = lens.id == selectedId
                     val textColor by animateColorAsState(
                         targetValue = when {
-                            selected -> CamOnAccent
+                            selected -> MaterialTheme.colorScheme.onPrimary
                             !enabled -> CamMuted
                             else -> CamWhite
                         },
@@ -672,12 +670,12 @@ private fun BarButton(
 ) {
     // No border: the old accent outline left a coloured halo over bright scenes.
     val background by animateColorAsState(
-        targetValue = if (active) CamAccent else CamBarBtn,
+        targetValue = if (active) MaterialTheme.colorScheme.primary else CamBarBtn,
         animationSpec = tween(160),
         label = "barButtonBg"
     )
     val tint by animateColorAsState(
-        targetValue = if (active) CamOnAccent else CamAccent,
+        targetValue = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
         animationSpec = tween(160),
         label = "barButtonTint"
     )
@@ -742,13 +740,13 @@ private fun SegmentButton(
     onClick: () -> Unit
 ) {
     val backgroundColor by animateColorAsState(
-        targetValue = if (isSelected) CamAccent else Color.Transparent,
+        targetValue = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
         animationSpec = tween(160),
         label = "segmentBg"
     )
     val iconTint by animateColorAsState(
         targetValue = when {
-            isSelected -> CamOnAccent
+            isSelected -> MaterialTheme.colorScheme.onPrimary
             !enabled -> CamMuted
             else -> CamWhite
         },

@@ -5,6 +5,9 @@
 
 package com.necra.purecam.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -15,27 +18,48 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.FrameRateCategory
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.preferredFrameRate
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.necra.purecam.R
 import com.necra.purecam.core.CaptureAspectMode
 import com.necra.purecam.core.OverlayStyle
 import com.necra.purecam.core.WbPreset
+import com.necra.purecam.core.WhiteBalanceMode
 import com.necra.purecam.presentation.CameraUiState
 import com.necra.purecam.presentation.CameraViewModel
+import java.util.Locale
+import kotlinx.coroutines.launch
 
-/** Compact camera settings: framing first, with only the available video choices below it. */
+/** One compact chip inside a settings group. */
+private data class ChipOption<T>(
+    val value: T,
+    val label: String
+)
+
+private val ChipShape = RoundedCornerShape(11.dp)
+
+/**
+ * Compact single-page camera settings: one label per group, small option chips and a thin
+ * separator between groups.
+ */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CaptureSettingsSheet(
@@ -43,10 +67,16 @@ fun CaptureSettingsSheet(
     viewModel: CameraViewModel,
     onDismiss: () -> Unit
 ) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    val closeSheet: () -> Unit = {
+        scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+    }
+
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = closeSheet,
         modifier = Modifier.preferredFrameRate(FrameRateCategory.High),
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Column(
@@ -54,137 +84,237 @@ fun CaptureSettingsSheet(
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp)
+                .padding(bottom = 24.dp)
         ) {
-            Text(stringResource(R.string.capture_settings), style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.height(20.dp))
+            GroupHeader(stringResource(R.string.mode_photo))
 
-            Text(stringResource(R.string.aspect_ratio), style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = state.aspectMode == CaptureAspectMode.PORTRAIT_9_16,
-                    onClick = hapticAction { viewModel.setCaptureAspectMode(CaptureAspectMode.PORTRAIT_9_16) },
-                    label = { Text(stringResource(R.string.aspect_9_16)) }
-                )
-                FilterChip(
-                    selected = state.aspectMode == CaptureAspectMode.ORIGINAL,
-                    onClick = hapticAction { viewModel.setCaptureAspectMode(CaptureAspectMode.ORIGINAL) },
-                    label = { Text(stringResource(R.string.aspect_original)) }
+            val lens = state.lens
+
+            CompactSection(
+                title = stringResource(R.string.ratio),
+                value = ratioSummary(state)
+            ) {
+                ChipRow(
+                    options = CaptureAspectMode.entries.map { mode ->
+                        ChipOption(mode, ratioLabel(mode))
+                    },
+                    isSelected = { it == state.aspectMode },
+                    enabled = !state.recording && !state.recordingStarting,
+                    onSelect = viewModel::setCaptureAspectMode
                 )
             }
 
-            Spacer(Modifier.height(16.dp))
-            WhiteBalanceSettings(state = state, viewModel = viewModel)
+            if (lens != null) {
+                CompactSection(
+                    title = stringResource(R.string.white_balance),
+                    value = whiteBalanceLabel(state.cameraState?.wb)
+                ) {
+                    ChipRow(
+                        options = WbPreset.CYCLE_ORDER
+                            .filter { lens.awbPresets.contains(it) }
+                            .map { ChipOption(it, it.label) },
+                        isSelected = { it in state.enabledWbPresets },
+                        onSelect = { preset ->
+                            viewModel.setWbPresetEnabled(preset, preset !in state.enabledWbPresets)
+                        }
+                    )
+                    if (state.enabledWbPresets.none { lens.awbPresets.contains(it) }) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = stringResource(R.string.wb_none_enabled),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
 
-            Spacer(Modifier.height(16.dp))
-            OverlaySettings(state = state, viewModel = viewModel)
+            CompactSection(
+                title = stringResource(R.string.overlay),
+                value = overlaySummary(state)
+            ) {
+                ChipRow(
+                    options = OverlayStyle.entries.map { ChipOption(it, it.label) },
+                    isSelected = { it in state.enabledOverlays },
+                    onSelect = { style ->
+                        viewModel.setOverlayEnabled(style, style !in state.enabledOverlays)
+                    }
+                )
+            }
 
             if (state.supportsVideo) {
-                Spacer(Modifier.height(16.dp))
-                Text(stringResource(R.string.video_section), style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(12.dp))
-                OptionGroup(stringResource(R.string.resolution)) {
-                    state.availableVideoQualities.forEach { quality ->
-                        FilterChip(
-                            selected = state.videoConfig?.quality == quality,
-                            onClick = hapticAction { viewModel.setVideoQuality(quality) },
-                            label = { Text(quality.label) }
-                        )
-                    }
+                GroupHeader(stringResource(R.string.video_section))
+                CompactSection(
+                    title = stringResource(R.string.resolution),
+                    value = state.videoConfig?.quality?.label.orEmpty()
+                ) {
+                    ChipRow(
+                        options = state.availableVideoQualities.map {
+                            ChipOption(it, it.label)
+                        },
+                        isSelected = { it == state.videoConfig?.quality },
+                        enabled = !state.recording && !state.recordingStarting,
+                        onSelect = viewModel::setVideoQuality
+                    )
                 }
-                Spacer(Modifier.height(8.dp))
-                OptionGroup(stringResource(R.string.frame_rate)) {
-                    state.availableVideoFps.forEach { fps ->
-                        FilterChip(
-                            selected = state.videoConfig?.fps == fps,
-                            onClick = hapticAction { viewModel.setVideoFps(fps) },
-                            label = { Text(stringResource(R.string.frame_rate_value, fps)) }
-                        )
-                    }
+
+                val activeFps = state.videoConfig?.fps ?: state.videoFps
+                CompactSection(
+                    title = stringResource(R.string.frame_rate),
+                    value = stringResource(R.string.frame_rate_value, activeFps)
+                ) {
+                    ChipRow(
+                        options = state.availableVideoFps.map {
+                            ChipOption(it, stringResource(R.string.frame_rate_value, it))
+                        },
+                        isSelected = { it == activeFps },
+                        enabled = !state.recording && !state.recordingStarting,
+                        onSelect = viewModel::setVideoFps
+                    )
                 }
             }
-        }
-    }
-}
 
-@Composable
-private fun WhiteBalanceSettings(
-    state: CameraUiState,
-    viewModel: CameraViewModel
-) {
-    val lens = state.lens
-    Text(stringResource(R.string.white_balance), style = MaterialTheme.typography.titleMedium)
-    Spacer(Modifier.height(4.dp))
-    Text(
-        text = stringResource(R.string.white_balance_help),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-    Spacer(Modifier.height(8.dp))
-
-    OptionGroup(stringResource(R.string.wb_presets)) {
-        WbPreset.CYCLE_ORDER.forEach { preset ->
-            if (lens?.awbPresets?.contains(preset) == true) {
-                val enabled = preset in state.enabledWbPresets
-                FilterChip(
-                    selected = enabled,
-                    onClick = hapticAction { viewModel.setWbPresetEnabled(preset, !enabled) },
-                    label = { Text(preset.label) }
-                )
-            }
-        }
-    }
-
-    val anyPreset = state.enabledWbPresets.any { lens?.awbPresets?.contains(it) == true }
-    if (!anyPreset) {
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = stringResource(R.string.wb_none_enabled),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-@Composable
-private fun OverlaySettings(
-    state: CameraUiState,
-    viewModel: CameraViewModel
-) {
-    Text(stringResource(R.string.overlay), style = MaterialTheme.typography.titleMedium)
-    Spacer(Modifier.height(4.dp))
-    Text(
-        text = stringResource(R.string.overlay_help),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-    Spacer(Modifier.height(8.dp))
-
-    OptionGroup(stringResource(R.string.overlay_effects)) {
-        OverlayStyle.entries.forEach { style ->
-            val enabled = style in state.enabledOverlays
-            FilterChip(
-                selected = enabled,
-                onClick = hapticAction { viewModel.setOverlayEnabled(style, !enabled) },
-                label = { Text(style.label) }
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = stringResource(R.string.settings_tip),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
 }
 
 @Composable
-private fun OptionGroup(
+private fun CompactSection(
     title: String,
-    content: @Composable androidx.compose.foundation.layout.FlowRowScope.() -> Unit
+    value: String?,
+    content: @Composable () -> Unit
 ) {
-    Column {
-        Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(4.dp))
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(0.dp),
-            content = content
-        )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(Modifier.weight(1f))
+            if (value != null) {
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        content()
     }
 }
+
+@Composable
+private fun <T> ChipRow(
+    options: List<ChipOption<T>>,
+    isSelected: (T) -> Boolean,
+    enabled: Boolean = true,
+    onSelect: (T) -> Unit
+) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        options.forEach { option ->
+            val selected = isSelected(option.value)
+            val background by animateColorAsState(
+                targetValue = if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerHighest
+                },
+                animationSpec = tween(150),
+                label = "chipBackground"
+            )
+            val contentColor by animateColorAsState(
+                targetValue = when {
+                    selected -> MaterialTheme.colorScheme.onPrimary
+                    enabled -> MaterialTheme.colorScheme.onSurface
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                animationSpec = tween(150),
+                label = "chipContent"
+            )
+            Row(
+                modifier = Modifier
+                    .height(34.dp)
+                    .clip(ChipShape)
+                    .background(background)
+                    .hapticClickable(enabled = enabled) { onSelect(option.value) }
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = option.label,
+                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
+                    color = contentColor,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GroupHeader(title: String) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(Modifier.height(8.dp))
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.18f)
+        )
+        Spacer(Modifier.height(2.dp))
+    }
+}
+
+@Composable
+private fun ratioLabel(mode: CaptureAspectMode): String = when (mode) {
+    CaptureAspectMode.PORTRAIT_9_16 -> stringResource(R.string.ratio_9_16)
+    CaptureAspectMode.ORIGINAL -> stringResource(R.string.ratio_original)
+}
+
+@Composable
+private fun ratioSummary(state: CameraUiState): String {
+    val ratio = ratioLabel(state.aspectMode)
+    val megapixels = state.photoSize?.let { formatMegapixels(it.width, it.height) }
+        ?: return ratio
+    return stringResource(R.string.ratio_summary, ratio, megapixels)
+}
+
+@Composable
+private fun overlaySummary(state: CameraUiState): String = when (state.enabledOverlays.size) {
+    0 -> stringResource(R.string.off)
+    1 -> state.enabledOverlays.first().label
+    else -> stringResource(R.string.overlay_active_count, state.enabledOverlays.size)
+}
+
+@Composable
+private fun whiteBalanceLabel(wb: WhiteBalanceMode?): String = when (wb) {
+    is WhiteBalanceMode.Preset -> wb.preset.label
+    is WhiteBalanceMode.Kelvin -> stringResource(R.string.kelvin_value, wb.kelvin)
+    else -> stringResource(R.string.auto)
+}
+
+private fun formatMegapixels(width: Int, height: Int): String =
+    String.format(Locale.US, "%.1f", width.toLong() * height / 1_000_000.0)

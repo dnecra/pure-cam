@@ -209,25 +209,30 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         controller?.setCaptureAspectMode(mode)
     }
 
-    fun toggleFlash() {
+    fun setFlash(on: Boolean) {
         val s = _uiState.value.cameraState ?: return
-        if (!s.lens.flashAvailable) {
+        if (on && !s.lens.flashAvailable) {
             emitMessage(message(R.string.no_flash))
             return
         }
-        controller?.setFlash(!s.flash)
-        emitMessage(message(if (s.flash) R.string.flash_off else R.string.flash_on))
+        if (s.flash == on) return
+        controller?.setFlash(on)
+        emitMessage(message(if (on) R.string.flash_on else R.string.flash_off))
     }
 
-    fun cycleTimer() {
-        if (_uiState.value.recording) return
+    fun toggleFlash() {
+        val s = _uiState.value.cameraState ?: return
+        setFlash(!s.flash)
+    }
+
+    fun setTimer(mode: TimerMode) {
+        if (_uiState.value.recording || _uiState.value.timer == mode) return
         cancelCountdown()
-        val next = _uiState.value.timer.next()
-        prefs.timer = next
-        _uiState.update { it.copy(timer = next) }
+        prefs.timer = mode
+        _uiState.update { it.copy(timer = mode) }
         emitMessage(
             message(
-                when (next) {
+                when (mode) {
                     TimerMode.OFF -> R.string.timer_off
                     TimerMode.THREE -> R.string.timer_3s_set
                     TimerMode.TEN -> R.string.timer_10s_set
@@ -236,10 +241,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         )
     }
 
+    fun cycleTimer() {
+        setTimer(_uiState.value.timer.next())
+    }
+
+    fun setGrid(visible: Boolean) {
+        if (_uiState.value.grid == visible) return
+        prefs.gridVisible = visible
+        _uiState.update { it.copy(grid = visible) }
+    }
+
     fun toggleGrid() {
-        val next = !_uiState.value.grid
-        prefs.gridVisible = next
-        _uiState.update { it.copy(grid = next) }
+        setGrid(!_uiState.value.grid)
     }
 
     fun flipCamera() {

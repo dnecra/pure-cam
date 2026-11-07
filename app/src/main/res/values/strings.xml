@@ -30,10 +30,14 @@
     <!-- Video -->
     <string name="mode_photo">Photo</string>
     <string name="mode_video">Video</string>
-    <string name="capture_settings">Capture settings</string>
-    <string name="aspect_ratio">Aspect ratio</string>
-    <string name="aspect_9_16">9:16 crop</string>
-    <string name="aspect_original">Original (no crop)</string>
+    <string name="ratio">Ratio</string>
+    <string name="ratio_9_16">9:16</string>
+    <string name="ratio_original">Original</string>
+    <string name="ratio_summary">%1$s · %2$s MP</string>
+    <string name="auto">Auto</string>
+    <string name="off">Off</string>
+    <string name="kelvin_value">%1$d K</string>
+    <string name="settings_tip">Tip: the WB button cycles through the presets enabled here. Overlays are added to saved photos only.</string>
     <string name="video_section">Video</string>
     <string name="resolution">Resolution</string>
     <string name="frame_rate">Frame rate</string>
@@ -44,12 +48,9 @@
 
     <!-- White balance -->
     <string name="white_balance">White balance</string>
-    <string name="white_balance_help">Tap the WB button to cycle through the enabled presets. Auto is always included.</string>
-    <string name="wb_presets">Presets</string>
     <string name="wb_none_enabled">No presets enabled — the WB button will stay on Auto.</string>
 
     <!-- Film overlay -->
     <string name="overlay">Film overlay</string>
-    <string name="overlay_help">Procedural effects added to saved photos only. Each shot is randomised, and an overlay can be used together with any white balance.</string>
-    <string name="overlay_effects">Effects</string>
+    <string name="overlay_active_count">%1$d active</string>
 </resources>
