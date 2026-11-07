@@ -67,6 +67,8 @@ import androidx.compose.ui.unit.sp
 import com.necra.purecam.R
 import com.necra.purecam.core.Facing
 import com.necra.purecam.core.LensProfile
+import com.necra.purecam.core.OverlayStyle
+import com.necra.purecam.core.WbPreset
 import com.necra.purecam.core.WhiteBalanceMode
 import com.necra.purecam.presentation.CameraUiState
 import com.necra.purecam.presentation.CaptureMode
@@ -113,20 +115,36 @@ fun GoogleCameraUI(
     val canFlip = lens != null && state.catalog.lenses(
         if (lens.facing == Facing.BACK) Facing.FRONT else Facing.BACK
     ).isNotEmpty()
-    val whiteBalanceActive = state.cameraState?.wb !is WhiteBalanceMode.Auto
+    val wbMode = state.cameraState?.wb
+    val whiteBalanceCycleEnabled = state.lens?.let { lens ->
+        WbPreset.CYCLE_ORDER.any { it in lens.awbPresets && it in state.enabledWbPresets }
+    } == true
+    val whiteBalanceNumber = when (wbMode) {
+        is WhiteBalanceMode.Preset -> (WbPreset.CYCLE_ORDER.indexOf(wbMode.preset) + 2).toString()
+        is WhiteBalanceMode.Kelvin -> "K"
+        is WhiteBalanceMode.Auto -> null
+        null -> null
+    }
+    val whiteBalanceColor = when (wbMode) {
+        is WhiteBalanceMode.Preset -> wbPresetColor(wbMode.preset)
+        is WhiteBalanceMode.Kelvin -> MaterialTheme.colorScheme.primary
+        else -> null
+    }
     val frameAspect = state.plan?.displayAspect ?: (9f / 16f)
 
-    // A WB change is announced for two seconds, then the pill falls back to the live spec.
-    val wbSpec = whiteBalanceLabel(state.cameraState?.wb)
-    var transientSpec by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(wbSpec) {
-        transientSpec = wbSpec
-        if (wbSpec != null) {
-            delay(2_000)
-            transientSpec = null
+    var transientWbSpec by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(wbMode) {
+        transientWbSpec = when (wbMode) {
+            is WhiteBalanceMode.Preset -> wbMode.preset.label
+            is WhiteBalanceMode.Kelvin -> "${wbMode.kelvin} K"
+            else -> null
+        }
+        if (transientWbSpec != null) {
+            delay(2_500)
+            transientWbSpec = null
         }
     }
-    val spec = transientSpec ?: defaultSpec(state)
+    val spec = transientWbSpec ?: defaultSpec(state)
 
     Box(
         modifier = modifier
@@ -168,9 +186,8 @@ fun GoogleCameraUI(
                                     )
                             )
 
-                            // Top controls: flash + timer left, live spec in the middle, grid
-                            // right. They live inside the rounded frame so they never straddle
-                            // the viewfinder edge.
+                            // Keep the quick controls grouped to the left and the live status
+                            // pill aligned to the right.
                             Row(
                                 modifier = Modifier
                                     .align(Alignment.TopCenter)
@@ -178,10 +195,13 @@ fun GoogleCameraUI(
                                     .padding(horizontal = 10.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    modifier = Modifier.weight(1f),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    CircleIconButton(
+                                        icon = R.drawable.ic_grid,
+                                        description = stringResource(R.string.grid),
+                                        active = state.grid,
+                                        onClick = onGrid
+                                    )
                                     CircleIconButton(
                                         icon = if (flashOn) R.drawable.ic_flash_on else R.drawable.ic_flash_off,
                                         description = stringResource(R.string.flash),
@@ -191,17 +211,9 @@ fun GoogleCameraUI(
                                     )
                                     TimerButton(timer = state.timer, onClick = onTimer)
                                 }
-                                SpecPill(text = spec, onClick = onSettings)
-                                Row(
-                                    modifier = Modifier.weight(1f),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
-                                ) {
-                                    CircleIconButton(
-                                        icon = R.drawable.ic_grid,
-                                        description = stringResource(R.string.grid),
-                                        active = state.grid,
-                                        onClick = onGrid
-                                    )
+                                Spacer(Modifier.weight(1f))
+                                Box(contentAlignment = Alignment.CenterEnd) {
+                                    SpecPill(text = spec, onClick = onSettings)
                                 }
                             }
 
@@ -317,7 +329,9 @@ fun GoogleCameraUI(
                 .padding(bottom = 14.dp),
             mode = state.captureMode,
             modeEnabled = state.supportsVideo && !busy,
-            whiteBalanceActive = whiteBalanceActive,
+            whiteBalanceCycleEnabled = whiteBalanceCycleEnabled,
+            whiteBalanceNumber = whiteBalanceNumber,
+            whiteBalanceColor = whiteBalanceColor,
             onSelectMode = onSelectMode,
             onSettings = onSettings,
             onWhiteBalance = onWhiteBalance
@@ -397,18 +411,24 @@ private fun TimerButton(timer: TimerMode, onClick: () -> Unit) {
     }
 }
 
-/** White-balance label shown briefly after the preset changes, or null when WB is automatic. */
-private fun whiteBalanceLabel(wb: WhiteBalanceMode?): String? = when (wb) {
-    is WhiteBalanceMode.Preset -> wb.preset.label
-    is WhiteBalanceMode.Kelvin -> "${wb.kelvin} K"
-    else -> null
-}
-
 /** The steady-state status: the photo aspect ratio or video quality/frame rate. */
 private fun defaultSpec(state: CameraUiState): String? = if (state.videoMode) {
     state.videoConfig?.let { "${it.quality.label} · ${it.fps} fps" }
 } else {
-    state.plan?.let { "JPG · ${aspectRatioLabel(it.displayAspect)}" }
+    state.plan?.let {
+        val base = "JPG · ${aspectRatioLabel(it.displayAspect)}"
+        if (state.enabledOverlays.isNotEmpty()) "$base · Filter ON" else base
+    }
+}
+
+private fun wbPresetColor(preset: WbPreset): Color = when (preset) {
+    WbPreset.INCANDESCENT -> Color(0xFFFF9A5C)
+    WbPreset.FLUORESCENT -> Color(0xFFB9D77A)
+    WbPreset.WARM_FLUORESCENT -> Color(0xFFFFC266)
+    WbPreset.DAYLIGHT -> Color(0xFFFFE28A)
+    WbPreset.CLOUDY_DAYLIGHT -> Color(0xFFA9D9F5)
+    WbPreset.TWILIGHT -> Color(0xFFB9A0D8)
+    WbPreset.SHADE -> Color(0xFF83BDE0)
 }
 
 private fun aspectRatioLabel(aspect: Float): String {
@@ -436,7 +456,7 @@ private tailrec fun greatestCommonDivisor(a: Int, b: Int): Int =
     if (b == 0) a else greatestCommonDivisor(b, a % b)
 /**
  * Status pill that hugs its label. Its width springs between labels, so the top row stays
- * centred while the WB preset and the live spec cross-fade.
+ * centred while the live spec changes.
  */
 @Composable
 private fun SpecPill(text: String?, onClick: () -> Unit) {
@@ -618,7 +638,9 @@ private fun BottomBar(
     modifier: Modifier = Modifier,
     mode: CaptureMode,
     modeEnabled: Boolean,
-    whiteBalanceActive: Boolean,
+    whiteBalanceCycleEnabled: Boolean,
+    whiteBalanceNumber: String?,
+    whiteBalanceColor: Color?,
     onSelectMode: (CaptureMode) -> Unit,
     onSettings: () -> Unit,
     onWhiteBalance: () -> Unit
@@ -654,7 +676,10 @@ private fun BottomBar(
             BarButton(
                 icon = R.drawable.ic_white_balance,
                 description = stringResource(R.string.wb),
-                active = whiteBalanceActive,
+                active = whiteBalanceCycleEnabled,
+                enabled = whiteBalanceCycleEnabled,
+                number = whiteBalanceNumber,
+                activeColor = whiteBalanceColor,
                 onClick = onWhiteBalance
             )
         }
@@ -666,16 +691,27 @@ private fun BarButton(
     icon: Int,
     description: String,
     onClick: () -> Unit,
-    active: Boolean = false
+    active: Boolean = false,
+    number: String? = null,
+    activeColor: Color? = null,
+    enabled: Boolean = true
 ) {
     // No border: the old accent outline left a coloured halo over bright scenes.
     val background by animateColorAsState(
-        targetValue = if (active) MaterialTheme.colorScheme.primary else CamBarBtn,
+        targetValue = when {
+            !enabled -> CamBarBtn
+            active -> activeColor ?: MaterialTheme.colorScheme.primary
+            else -> CamBarBtn
+        },
         animationSpec = tween(160),
         label = "barButtonBg"
     )
     val tint by animateColorAsState(
-        targetValue = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
+        targetValue = when {
+            !enabled -> CamMuted
+            active -> MaterialTheme.colorScheme.onPrimary
+            else -> MaterialTheme.colorScheme.primary
+        },
         animationSpec = tween(160),
         label = "barButtonTint"
     )
@@ -684,15 +720,24 @@ private fun BarButton(
             .size(48.dp)
             .clip(CircleShape)
             .background(background)
-            .hapticClickable(onClick = onClick),
+            .hapticClickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            painter = painterResource(icon),
-            contentDescription = description,
-            tint = tint,
-            modifier = Modifier.size(24.dp)
-        )
+        if (number == null) {
+            Icon(
+                painter = painterResource(icon),
+                contentDescription = description,
+                tint = tint,
+                modifier = Modifier.size(24.dp)
+            )
+        } else {
+            Text(
+                text = number,
+                color = if (active) Color(0xFF292920) else MaterialTheme.colorScheme.primary,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
     }
 }
 

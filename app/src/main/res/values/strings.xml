@@ -48,6 +48,8 @@
 
     <!-- White balance -->
     <string name="white_balance">White balance</string>
+    <string name="wb_cycle_count">%1$d active</string>
+    <string name="wb_cycle_only_auto">Only Auto</string>
     <string name="wb_none_enabled">No presets enabled — the WB button will stay on Auto.</string>
 
     <!-- Film overlay -->
