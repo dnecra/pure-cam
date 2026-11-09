@@ -164,11 +164,10 @@ object RequestApplier {
     internal fun awbMode(preset: WbPreset): Int = when (preset) {
         WbPreset.INCANDESCENT -> CameraMetadata.CONTROL_AWB_MODE_INCANDESCENT
         WbPreset.FLUORESCENT -> CameraMetadata.CONTROL_AWB_MODE_FLUORESCENT
-        WbPreset.WARM_FLUORESCENT -> CameraMetadata.CONTROL_AWB_MODE_WARM_FLUORESCENT
         WbPreset.DAYLIGHT -> CameraMetadata.CONTROL_AWB_MODE_DAYLIGHT
         WbPreset.CLOUDY_DAYLIGHT -> CameraMetadata.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT
         WbPreset.TWILIGHT -> CameraMetadata.CONTROL_AWB_MODE_TWILIGHT
-        WbPreset.SHADE -> CameraMetadata.CONTROL_AWB_MODE_SHADE
+        WbPreset.MOONLIGHT -> CameraMetadata.CONTROL_AWB_MODE_SHADE
     }
 
     private fun RectI.toRect(): Rect = Rect(left, top, right, bottom)

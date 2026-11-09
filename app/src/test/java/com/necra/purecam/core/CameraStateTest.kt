@@ -70,7 +70,7 @@ class CameraStateTest {
             manualPostProcessing = false
         )
 
-        val preset = TestProfiles.autoState(lens, wb = WhiteBalanceMode.Preset(WbPreset.SHADE)).clamped()
+        val preset = TestProfiles.autoState(lens, wb = WhiteBalanceMode.Preset(WbPreset.MOONLIGHT)).clamped()
         val kelvin = TestProfiles.autoState(lens, wb = WhiteBalanceMode.Kelvin(5000)).clamped()
 
         assertEquals(WhiteBalanceMode.Auto, preset.wb)

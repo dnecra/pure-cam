@@ -117,7 +117,7 @@ internal fun ShutterButton(
                 scaleX = scale
                 scaleY = scale
             }
-            .border(4.dp, Color.White.copy(alpha = 0.92f), CircleShape)
+            .border(4.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.92f), CircleShape)
             .padding(7.dp)
             .clip(CircleShape)
             .background(accent)
@@ -148,7 +148,7 @@ internal fun ShutterButton(
                     modifier = Modifier
                         .size(24.dp)
                         .clip(RoundedCornerShape(7.dp))
-                        .background(Color.White)
+                        .background(MaterialTheme.colorScheme.onSurface)
                 )
                 "capturing" -> CircularProgressIndicator(
                     modifier = Modifier.size(26.dp),
@@ -174,8 +174,8 @@ internal fun FlipButton(enabled: Boolean, rotationDegrees: Int, onClick: () -> U
         modifier = Modifier
             .size(48.dp)
             .clip(CircleShape)
-            .background(Color.Black.copy(alpha = 0.28f))
-            .border(1.dp, Color.White.copy(alpha = 0.12f), CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.65f))
+            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f), CircleShape)
             .hapticClickable(enabled = enabled) {
                 turns += 1
                 onClick()
@@ -185,7 +185,7 @@ internal fun FlipButton(enabled: Boolean, rotationDegrees: Int, onClick: () -> U
         Icon(
             painter = painterResource(R.drawable.ic_flip),
             contentDescription = stringResource(R.string.flip_camera),
-            tint = if (enabled) Color.White.copy(alpha = 0.92f) else Color.White.copy(alpha = 0.3f),
+            tint = if (enabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.92f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
             modifier = Modifier
                 .size(22.dp)
                 .graphicsLayer { rotationZ = angle }
@@ -208,8 +208,8 @@ internal fun PhotoThumbnail(
         modifier = Modifier
             .size(48.dp)
             .clip(shape)
-            .background(Color.Black.copy(alpha = 0.32f))
-            .border(1.dp, Color.White.copy(alpha = 0.28f), shape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.65f))
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f), shape)
             .hapticClickable(enabled = uri != null) { uri?.let(onClick) },
         contentAlignment = Alignment.Center
     ) {
@@ -225,18 +225,19 @@ internal fun PhotoThumbnail(
             Icon(
                 painter = painterResource(R.drawable.ic_photo),
                 contentDescription = null,
-                tint = Color.White.copy(alpha = 0.7f),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                 modifier = Modifier.size(20.dp)
             )
         }
         if (isVideo && bitmap != null) {
+            val playIconColor = MaterialTheme.colorScheme.onSurface
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(4.dp)
                     .size(16.dp)
                     .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.65f)),
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f)),
                 contentAlignment = Alignment.Center
             ) {
                 Canvas(modifier = Modifier.size(7.dp)) {
@@ -246,7 +247,7 @@ internal fun PhotoThumbnail(
                         lineTo(0f, size.height)
                         close()
                     }
-                    drawPath(path, Color.White)
+                    drawPath(path, playIconColor)
                 }
             }
         }
@@ -260,6 +261,7 @@ internal fun PhotoThumbnail(
 @Composable
 fun RecordingPill(modifier: Modifier = Modifier) {
     var elapsedMs by remember { mutableLongStateOf(0L) }
+    val recordingColor = MaterialTheme.colorScheme.error
     LaunchedEffect(Unit) {
         val startedAt = SystemClock.elapsedRealtime()
         while (true) {
@@ -269,7 +271,7 @@ fun RecordingPill(modifier: Modifier = Modifier) {
     }
     Surface(
         shape = CircleShape,
-        color = Color.Black.copy(alpha = 0.45f),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.9f),
         modifier = modifier.height(34.dp)
     ) {
         Row(
@@ -289,7 +291,7 @@ fun RecordingPill(modifier: Modifier = Modifier) {
             )
             Canvas(modifier = Modifier.size(7.dp)) {
                 drawCircle(
-                    Color(0xFFFF5252).copy(alpha = dotAlpha),
+                    recordingColor.copy(alpha = dotAlpha),
                     radius = size.minDimension / 2f,
                     center = Offset(size.width / 2f, size.height / 2f)
                 )
@@ -297,7 +299,7 @@ fun RecordingPill(modifier: Modifier = Modifier) {
             Text(
                 text = com.necra.purecam.core.VideoMath.formatDuration(elapsedMs),
                 style = MaterialTheme.typography.labelMedium,
-                color = Color.White
+                color = MaterialTheme.colorScheme.onSurface
             )
         }
     }

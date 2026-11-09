@@ -10,6 +10,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,13 +65,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.graphics.Typeface
 
-private val PanelColor = Color(0xFF191918)
-private val InactiveOptionColor = Color(0xFF353533)
-private val SelectedOptionColor = Color(0xFFD0D0B3)
-private val PrimaryTextColor = Color(0xFFEEEEEE)
-private val SecondaryTextColor = Color(0xFFC5C5C0)
-private val ValueTextColor = Color(0xFFD0D0B3)
-private val SelectedTextColor = Color(0xFF292920)
 private val RoundedAndroidFont = FontFamily(Typeface.create("sans-serif-rounded", Typeface.NORMAL))
 
 @Composable
@@ -131,7 +125,7 @@ fun CaptureSettingsSheet(
                 Surface(
                     modifier = Modifier.fillMaxWidth().navigationBarsPadding(),
                     shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-                    color = PanelColor
+                    color = MaterialTheme.colorScheme.surface
                 ) {
                     Column(
                         modifier = Modifier
@@ -146,7 +140,7 @@ fun CaptureSettingsSheet(
                                 .width(44.dp)
                                 .height(5.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFF666666))
+                                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f))
                                 .pointerInput(Unit) {
                                     var drag = 0f
                                     detectVerticalDragGestures(
@@ -166,7 +160,7 @@ fun CaptureSettingsSheet(
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 "Settings",
-                                color = PrimaryTextColor,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 style = MaterialTheme.typography.titleLarge.copy(
                                     fontFamily = RoundedAndroidFont,
                                     fontSize = 24.sp
@@ -174,11 +168,16 @@ fun CaptureSettingsSheet(
                                 fontWeight = FontWeight.SemiBold
                             )
                             Spacer(Modifier.weight(1f))
-                            Text(
-                                "×",
-                                modifier = Modifier.hapticClickable { dismiss() }.padding(horizontal = 4.dp),
-                                color = SecondaryTextColor,
-                                fontSize = 28.sp
+                            Icon(
+                                painter = painterResource(R.drawable.ic_close),
+                                contentDescription = stringResource(R.string.close),
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                    .hapticClickable { dismiss() }
+                                    .padding(10.dp)
                             )
                         }
                         Spacer(Modifier.height(8.dp))
@@ -208,22 +207,23 @@ fun CaptureSettingsSheet(
                                     stringResource(R.string.wb_cycle_only_auto)
                                 } else {
                                     stringResource(R.string.wb_cycle_count, activePresetCount)
-                                }
+                                },
                             ) {
                                 FlowRow(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    maxItemsInEachRow = 4,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     CircleOption(
                                         selected = true,
-                                        backgroundColor = SelectedOptionColor,
                                         enabled = false,
                                         onClick = {}
                                     ) {
                                         Icon(
                                             painter = painterResource(R.drawable.ic_white_balance),
                                             contentDescription = stringResource(R.string.auto),
-                                            tint = SelectedTextColor,
+                                            tint = MaterialTheme.colorScheme.onPrimary,
                                             modifier = Modifier.size(22.dp)
                                         )
                                     }
@@ -231,13 +231,18 @@ fun CaptureSettingsSheet(
                                         val selected = preset in state.enabledWbPresets
                                         CircleOption(
                                             selected = selected,
-                                            backgroundColor = wbButtonColor(preset),
                                             onClick = {
                                                 showWbIndicator(preset.label)
                                                 viewModel.setWbPresetEnabled(preset, !selected)
                                             }
                                         ) {
-                                            OptionNumber((WbPreset.CYCLE_ORDER.indexOf(preset) + 2).toString())
+                                            MaterialSymbolIcon(
+                                                symbol = preset.symbol,
+                                                description = preset.label,
+                                                tint = if (selected) MaterialTheme.colorScheme.onPrimary
+                                                else MaterialTheme.colorScheme.onSurface,
+                                                size = 16.sp
+                                            )
                                         }
                                     }
                                 }
@@ -246,17 +251,24 @@ fun CaptureSettingsSheet(
 
                         SettingRow("Film overlay", overlayValue(state)) {
                             FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                                maxItemsInEachRow = 4,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                OverlayStyle.entries.forEachIndexed { index, style ->
+                                OverlayStyle.entries.forEach { style ->
                                     val selected = style in state.enabledOverlays
                                     CircleOption(
                                         selected = selected,
-                                        backgroundColor = overlayButtonColor(style),
                                         onClick = { viewModel.setOverlayEnabled(style, !selected) }
                                     ) {
-                                        OptionNumber((index + 1).toString())
+                                        MaterialSymbolIcon(
+                                            symbol = style.symbol,
+                                            description = style.label,
+                                            tint = if (selected) MaterialTheme.colorScheme.onPrimary
+                                            else MaterialTheme.colorScheme.onSurface,
+                                            size = 16.sp
+                                        )
                                     }
                                 }
                             }
@@ -302,7 +314,7 @@ fun CaptureSettingsSheet(
                         ) {
                             Text(
                                 "made by Necra",
-                                color = SecondaryTextColor.copy(alpha = 0.72f),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
                                 style = MaterialTheme.typography.titleMedium.copy(fontSize = 10.sp)
                             )
                         }
@@ -319,15 +331,12 @@ private fun SettingRow(
     value: String,
     options: @Composable () -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    @Composable
+    fun LabelValue(modifier: Modifier) {
+        Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 label,
-                color = SecondaryTextColor,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontSize = 11.sp,
                     lineHeight = 12.sp,
@@ -337,12 +346,20 @@ private fun SettingRow(
             )
             Text(
                 value,
-                color = ValueTextColor,
+                color = MaterialTheme.colorScheme.primary,
                 style = MaterialTheme.typography.titleMedium.copy(fontSize = 19.sp, lineHeight = 20.sp),
                 maxLines = 2
             )
         }
-        Box(Modifier.widthIn(max = 200.dp), contentAlignment = Alignment.TopStart) {
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        LabelValue(Modifier.weight(1f))
+        Box(Modifier.widthIn(max = 200.dp), contentAlignment = Alignment.TopEnd) {
             options()
         }
     }
@@ -351,7 +368,6 @@ private fun SettingRow(
 @Composable
 private fun CircleOption(
     selected: Boolean,
-    backgroundColor: Color? = null,
     enabled: Boolean = true,
     onClick: () -> Unit,
     content: @Composable () -> Unit
@@ -360,40 +376,17 @@ private fun CircleOption(
         modifier = Modifier
             .size(40.dp)
             .clip(CircleShape)
-            .background(
-                backgroundColor?.let { if (selected) it else it.copy(alpha = 0.48f) }
-                    ?: if (selected) SelectedOptionColor else InactiveOptionColor
+            .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh)
+            .border(
+                width = if (selected) 2.dp else 0.dp,
+                color = if (selected) MaterialTheme.colorScheme.onSurface else Color.Transparent,
+                shape = CircleShape
             )
             .hapticClickable(enabled, onClick),
         contentAlignment = Alignment.Center
     ) {
         content()
     }
-}
-
-private fun wbButtonColor(preset: WbPreset): Color = when (preset) {
-    WbPreset.INCANDESCENT -> Color(0xFFFF9A5C)
-    WbPreset.FLUORESCENT -> Color(0xFFB9D77A)
-    WbPreset.WARM_FLUORESCENT -> Color(0xFFFFC266)
-    WbPreset.DAYLIGHT -> Color(0xFFFFE28A)
-    WbPreset.CLOUDY_DAYLIGHT -> Color(0xFFA9D9F5)
-    WbPreset.TWILIGHT -> Color(0xFFB9A0D8)
-    WbPreset.SHADE -> Color(0xFF83BDE0)
-}
-
-private fun overlayButtonColor(style: OverlayStyle): Color = when (style) {
-    OverlayStyle.DUST -> Color(0xFFB99A6C)
-    OverlayStyle.BURN_IN -> Color(0xFFC97845)
-    OverlayStyle.LIGHT_LEAK -> Color(0xFFBD7180)
-}
-
-@Composable
-private fun OptionNumber(number: String) {
-    Text(
-        number,
-        color = SelectedTextColor,
-        style = MaterialTheme.typography.titleMedium.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-    )
 }
 
 @Composable
@@ -408,14 +401,14 @@ private fun TextPill(
             .widthIn(min = 40.dp)
             .height(40.dp)
             .clip(RoundedCornerShape(24.dp))
-            .background(if (selected) SelectedOptionColor else InactiveOptionColor)
+            .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh)
             .hapticClickable(enabled, onClick)
             .padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             label,
-            color = if (selected) SelectedTextColor else PrimaryTextColor,
+            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
             style = MaterialTheme.typography.titleMedium.copy(fontSize = 12.sp),
             maxLines = 1,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center

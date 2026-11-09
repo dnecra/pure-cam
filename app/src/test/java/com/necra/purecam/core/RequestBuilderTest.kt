@@ -274,7 +274,7 @@ class RequestBuilderTest {
         )
         val unsupported = TestProfiles.autoState(
             TestProfiles.lens(awbPresets = setOf(WbPreset.DAYLIGHT)),
-            wb = WhiteBalanceMode.Preset(WbPreset.SHADE)
+            wb = WhiteBalanceMode.Preset(WbPreset.MOONLIGHT)
         )
 
         assertEquals(WbSetting.Preset(WbPreset.DAYLIGHT), build(supported).wb)

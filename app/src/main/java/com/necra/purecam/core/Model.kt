@@ -61,15 +61,14 @@ enum class Facing { BACK, FRONT, EXTERNAL }
 /** How a lens is reached. See plan section 3.3. */
 enum class LensMode { DIRECT, PHYSICAL, LOGICAL }
 
-/** White-balance presets that Camera2 can select directly. CCT is the nominal value used for display. */
-enum class WbPreset(val label: String, val cct: Int) {
-    INCANDESCENT("Incandescent", 2856),
-    FLUORESCENT("Fluorescent", 3800),
-    WARM_FLUORESCENT("Warm fluor.", 3500),
-    DAYLIGHT("Daylight", 5500),
-    CLOUDY_DAYLIGHT("Cloudy", 6500),
-    TWILIGHT("Twilight", 7000),
-    SHADE("Shade", 7500);
+/** White-balance presets that Camera2 can select directly. CCT is the nominal display value. */
+enum class WbPreset(val label: String, val cct: Int, val symbol: String) {
+    INCANDESCENT("Cloudy", 2856, "wb_cloudy"),
+    FLUORESCENT("Fluorescent", 3800, "wb_iridescent"),
+    DAYLIGHT("Warm", 5500, "wb_sunny"),
+    CLOUDY_DAYLIGHT("Warmer", 6500, "brightness_high"),
+    TWILIGHT("Sunset", 7000, "wb_twilight"),
+    MOONLIGHT("Moonlight", 7500, "bedtime");
 
     companion object {
         /** Fixed order shared by the viewfinder WB button and the settings sheet. */
@@ -77,10 +76,9 @@ enum class WbPreset(val label: String, val cct: Int) {
             DAYLIGHT,
             CLOUDY_DAYLIGHT,
             INCANDESCENT,
+            MOONLIGHT,
             FLUORESCENT,
-            WARM_FLUORESCENT,
-            TWILIGHT,
-            SHADE
+            TWILIGHT
         )
     }
 }
@@ -93,10 +91,10 @@ enum class WbPreset(val label: String, val cct: Int) {
  * no two photos look alike. They are applied to stills only; the live preview always shows
  * the unprocessed frame.
  */
-enum class OverlayStyle(val label: String) {
-    DUST("Dust & noise"),
-    BURN_IN("Burn-in"),
-    LIGHT_LEAK("Light leak")
+enum class OverlayStyle(val label: String, val symbol: String) {
+    DUST("Dust & noise", "grain"),
+    BURN_IN("Burn-in", "local_fire_department"),
+    LIGHT_LEAK("Light leak", "flare")
 }
 
 sealed interface ExposureMode {

@@ -182,6 +182,6 @@ class ManualWhiteBalanceTest {
     @Test
     fun presetKelvin_exposesNominalCct() {
         assertEquals(5500, ManualWhiteBalance.presetKelvin(WbPreset.DAYLIGHT))
-        assertEquals(WbPreset.SHADE.cct, ManualWhiteBalance.presetKelvin(WbPreset.SHADE))
+        assertEquals(WbPreset.MOONLIGHT.cct, ManualWhiteBalance.presetKelvin(WbPreset.MOONLIGHT))
     }
 }

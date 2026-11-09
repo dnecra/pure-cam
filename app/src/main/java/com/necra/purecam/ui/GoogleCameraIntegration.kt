@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -29,7 +30,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -192,7 +192,7 @@ private fun ExposureSlider(
                 .width(2.dp)
                 .height(trackHeight)
                 .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.55f))
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f))
         )
         // Thumb. Value runs bottom (-2 EV) to top (+2 EV).
         val fraction = (ev.value + EV_LIMIT) / (EV_LIMIT * 2f)
@@ -202,7 +202,7 @@ private fun ExposureSlider(
                 .width(12.dp)
                 .height(12.dp)
                 .clip(CircleShape)
-                .background(Color.White)
+                .background(MaterialTheme.colorScheme.onSurface)
         )
     }
 }

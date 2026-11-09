@@ -1,4 +1,4 @@
-﻿package com.necra.purecam.ui
+package com.necra.purecam.ui
 
 import android.net.Uri
 import androidx.compose.animation.AnimatedContent
@@ -77,12 +77,9 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 
-// Google Camera (Pixel) UI colours, taken from new-activity_camera.xml.
-private val CamBg = Color(0xFF000000)
-private val CamScrim = Color(0x99202124)
-private val CamBarBtn = Color(0xFF2B2B2D)
-private val CamWhite = Color(0xFFFFFFFF)
-private val CamMuted = Color(0xFF8E8E93)
+private val TopControlDiameter = 36.dp
+private val TopControlInset = 10.dp
+
 
 /**
  * Pixel-style camera layout: rounded viewfinder card, floating scrim controls and a bottom bar.
@@ -119,17 +116,7 @@ fun GoogleCameraUI(
     val whiteBalanceCycleEnabled = state.lens?.let { lens ->
         WbPreset.CYCLE_ORDER.any { it in lens.awbPresets && it in state.enabledWbPresets }
     } == true
-    val whiteBalanceNumber = when (wbMode) {
-        is WhiteBalanceMode.Preset -> (WbPreset.CYCLE_ORDER.indexOf(wbMode.preset) + 2).toString()
-        is WhiteBalanceMode.Kelvin -> "K"
-        is WhiteBalanceMode.Auto -> null
-        null -> null
-    }
-    val whiteBalanceColor = when (wbMode) {
-        is WhiteBalanceMode.Preset -> wbPresetColor(wbMode.preset)
-        is WhiteBalanceMode.Kelvin -> MaterialTheme.colorScheme.primary
-        else -> null
-    }
+    val whiteBalanceSymbol = (wbMode as? WhiteBalanceMode.Preset)?.preset?.symbol
     val frameAspect = state.plan?.displayAspect ?: (9f / 16f)
 
     var transientWbSpec by remember { mutableStateOf<String?>(null) }
@@ -149,7 +136,7 @@ fun GoogleCameraUI(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(CamBg)
+            .background(MaterialTheme.colorScheme.surfaceDim)
             // Keep every floating control clear of the status bar and gesture areas.
             .windowInsetsPadding(WindowInsets.safeDrawing)
     ) {
@@ -159,9 +146,9 @@ fun GoogleCameraUI(
                 .fillMaxSize()
                 .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 88.dp)
         ) {
-            // Plain black card. The preview is clipped by its selected-ratio window, so no extra
-            // rounded Surface layer wraps the whole viewfinder (one less layer per frame).
-            Box(modifier = Modifier.fillMaxSize().background(CamBg)) {
+            // Leave the area around the preview transparent so the shutter controls sit directly
+            // over the screen surface without a separate dark viewfinder box behind them.
+            Box(modifier = Modifier.fillMaxSize()) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     // Selected-ratio preview, fitted inside the viewfinder space.
                     ViewfinderFrame(
@@ -170,6 +157,22 @@ fun GoogleCameraUI(
                     ) {
                         Box(modifier = Modifier.fillMaxSize()) {
                             content()
+
+                            // Keep the preview scrim inside the rounded viewfinder. Extending it
+                            // below a short (for example 4:3) preview creates a square dark panel
+                            // behind the gallery and shutter controls.
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .fillMaxWidth()
+                                    .height(220.dp)
+                                    .background(
+                                        Brush.verticalGradient(
+                                            listOf(Color.Transparent, MaterialTheme.colorScheme.scrim.copy(alpha = 0.6f))
+                                        )
+                                    )
+                            )
+
                             GridOverlay(visible = state.grid)
                             CountdownOverlay(countdown = state.countdown)
 
@@ -181,7 +184,7 @@ fun GoogleCameraUI(
                                     .height(110.dp)
                                     .background(
                                         Brush.verticalGradient(
-                                            listOf(Color.Black.copy(alpha = 0.5f), Color.Transparent)
+                                            listOf(MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f), Color.Transparent)
                                         )
                                     )
                             )
@@ -231,20 +234,6 @@ fun GoogleCameraUI(
                             }
                         }
                     }
-
-                    // Bottom scrim stays on the card so the shutter row can sit below short
-                    // previews without losing contrast.
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .height(220.dp)
-                            .background(
-                                Brush.verticalGradient(
-                                    listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f))
-                                )
-                            )
-                    )
 
                     // Bottom stack inside the card: lens menu + shutter row.
                     Column(
@@ -330,8 +319,7 @@ fun GoogleCameraUI(
             mode = state.captureMode,
             modeEnabled = state.supportsVideo && !busy,
             whiteBalanceCycleEnabled = whiteBalanceCycleEnabled,
-            whiteBalanceNumber = whiteBalanceNumber,
-            whiteBalanceColor = whiteBalanceColor,
+            whiteBalanceSymbol = whiteBalanceSymbol,
             onSelectMode = onSelectMode,
             onSettings = onSettings,
             onWhiteBalance = onWhiteBalance
@@ -349,21 +337,21 @@ private fun CircleIconButton(
 ) {
     val tint by animateColorAsState(
         targetValue = when {
-            !enabled -> CamWhite.copy(alpha = 0.35f)
+            !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
             active -> MaterialTheme.colorScheme.onPrimary
-            else -> CamWhite
+            else -> MaterialTheme.colorScheme.onSurface
         },
         animationSpec = tween(160),
         label = "circleIconTint"
     )
     val background by animateColorAsState(
-        targetValue = if (active) MaterialTheme.colorScheme.primary else CamScrim,
+        targetValue = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
         animationSpec = tween(160),
         label = "circleIconBg"
     )
     Box(
         modifier = Modifier
-            .size(36.dp)
+            .size(TopControlDiameter)
             .clip(CircleShape)
             .background(background)
             .hapticClickable(enabled = enabled, onClick = onClick),
@@ -387,9 +375,9 @@ private fun TimerButton(timer: TimerMode, onClick: () -> Unit) {
     }
     Box(
         modifier = Modifier
-            .size(36.dp)
+            .size(TopControlDiameter)
             .clip(CircleShape)
-            .background(if (label == null) CamScrim else MaterialTheme.colorScheme.primary)
+            .background(if (label == null) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.primary)
             .hapticClickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -397,7 +385,7 @@ private fun TimerButton(timer: TimerMode, onClick: () -> Unit) {
             Icon(
                 painter = painterResource(R.drawable.ic_timer),
                 contentDescription = stringResource(R.string.timer),
-                tint = CamWhite,
+                tint = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.size(20.dp)
             )
         } else {
@@ -417,18 +405,8 @@ private fun defaultSpec(state: CameraUiState): String? = if (state.videoMode) {
 } else {
     state.plan?.let {
         val base = "JPG · ${aspectRatioLabel(it.displayAspect)}"
-        if (state.enabledOverlays.isNotEmpty()) "$base · Filter ON" else base
+        if (state.enabledOverlays.isNotEmpty()) "$base · Overlay enabled" else base
     }
-}
-
-private fun wbPresetColor(preset: WbPreset): Color = when (preset) {
-    WbPreset.INCANDESCENT -> Color(0xFFFF9A5C)
-    WbPreset.FLUORESCENT -> Color(0xFFB9D77A)
-    WbPreset.WARM_FLUORESCENT -> Color(0xFFFFC266)
-    WbPreset.DAYLIGHT -> Color(0xFFFFE28A)
-    WbPreset.CLOUDY_DAYLIGHT -> Color(0xFFA9D9F5)
-    WbPreset.TWILIGHT -> Color(0xFFB9A0D8)
-    WbPreset.SHADE -> Color(0xFF83BDE0)
 }
 
 private fun aspectRatioLabel(aspect: Float): String {
@@ -482,7 +460,7 @@ private fun SpecPill(text: String?, onClick: () -> Unit) {
             .width(pillWidth)
             .height(34.dp)
             .clip(CircleShape)
-            .background(if (text != null) CamScrim else Color.Transparent)
+            .background(if (text != null) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent)
             .hapticClickable(enabled = text != null, onClick = onClick)
             .padding(horizontal = if (text != null) 12.dp else 0.dp),
         contentAlignment = Alignment.Center
@@ -495,7 +473,7 @@ private fun SpecPill(text: String?, onClick: () -> Unit) {
             if (value != null) {
                 Text(
                     text = value,
-                    color = CamWhite.copy(alpha = 0.92f),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.92f),
                     style = style,
                     maxLines = 1
                 )
@@ -513,8 +491,8 @@ private fun ViewfinderFrame(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    // Matches the 36 dp top-button circles so the frame corner and button curves line up.
-    val shape = RoundedCornerShape(18.dp)
+    // The viewfinder radius follows the top control curve plus its inset from the frame edge.
+    val shape = RoundedCornerShape(TopControlDiameter / 2f + TopControlInset)
     Box(
         modifier = modifier
             .layout { measurable, constraints ->
@@ -528,7 +506,7 @@ private fun ViewfinderFrame(
                 layout(width, height) { placeable.place(0, 0) }
             }
             .clip(shape)
-            .border(1.dp, CamWhite.copy(alpha = 0.16f), shape)
+            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f), shape)
     ) {
         content()
     }
@@ -570,7 +548,7 @@ private fun LensSegmented(
 
     Surface(
         shape = RoundedCornerShape(20.dp),
-        color = CamBarBtn.copy(alpha = 0.25f)
+        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.25f)
     ) {
         Box(
             modifier = Modifier
@@ -596,8 +574,8 @@ private fun LensSegmented(
                     val textColor by animateColorAsState(
                         targetValue = when {
                             selected -> MaterialTheme.colorScheme.onPrimary
-                            !enabled -> CamMuted
-                            else -> CamWhite
+                            !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
+                            else -> MaterialTheme.colorScheme.onSurface
                         },
                         animationSpec = spring(dampingRatio = 0.82f, stiffness = 700f),
                         label = "lensText"
@@ -639,8 +617,7 @@ private fun BottomBar(
     mode: CaptureMode,
     modeEnabled: Boolean,
     whiteBalanceCycleEnabled: Boolean,
-    whiteBalanceNumber: String?,
-    whiteBalanceColor: Color?,
+    whiteBalanceSymbol: String?,
     onSelectMode: (CaptureMode) -> Unit,
     onSettings: () -> Unit,
     onWhiteBalance: () -> Unit
@@ -678,8 +655,7 @@ private fun BottomBar(
                 description = stringResource(R.string.wb),
                 active = whiteBalanceCycleEnabled,
                 enabled = whiteBalanceCycleEnabled,
-                number = whiteBalanceNumber,
-                activeColor = whiteBalanceColor,
+                symbol = whiteBalanceSymbol,
                 onClick = onWhiteBalance
             )
         }
@@ -692,23 +668,22 @@ private fun BarButton(
     description: String,
     onClick: () -> Unit,
     active: Boolean = false,
-    number: String? = null,
-    activeColor: Color? = null,
+    symbol: String? = null,
     enabled: Boolean = true
 ) {
     // No border: the old accent outline left a coloured halo over bright scenes.
     val background by animateColorAsState(
         targetValue = when {
-            !enabled -> CamBarBtn
-            active -> activeColor ?: MaterialTheme.colorScheme.primary
-            else -> CamBarBtn
+            !enabled -> MaterialTheme.colorScheme.surfaceContainer
+            active -> MaterialTheme.colorScheme.primary
+            else -> MaterialTheme.colorScheme.surfaceContainer
         },
         animationSpec = tween(160),
         label = "barButtonBg"
     )
     val tint by animateColorAsState(
         targetValue = when {
-            !enabled -> CamMuted
+            !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
             active -> MaterialTheme.colorScheme.onPrimary
             else -> MaterialTheme.colorScheme.primary
         },
@@ -723,7 +698,7 @@ private fun BarButton(
             .hapticClickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        if (number == null) {
+        if (symbol == null) {
             Icon(
                 painter = painterResource(icon),
                 contentDescription = description,
@@ -731,11 +706,11 @@ private fun BarButton(
                 modifier = Modifier.size(24.dp)
             )
         } else {
-            Text(
-                text = number,
-                color = if (active) Color(0xFF292920) else MaterialTheme.colorScheme.primary,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold
+            MaterialSymbolIcon(
+                symbol = symbol,
+                description = description,
+                tint = tint,
+                size = 16.sp
             )
         }
     }
@@ -749,7 +724,7 @@ private fun SegmentedControl(
 ) {
     Surface(
         shape = RoundedCornerShape(24.dp),
-        color = CamBarBtn
+        color = MaterialTheme.colorScheme.surfaceContainer
     ) {
         Row(
             modifier = Modifier
@@ -792,8 +767,8 @@ private fun SegmentButton(
     val iconTint by animateColorAsState(
         targetValue = when {
             isSelected -> MaterialTheme.colorScheme.onPrimary
-            !enabled -> CamMuted
-            else -> CamWhite
+            !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
+            else -> MaterialTheme.colorScheme.onSurface
         },
         animationSpec = tween(160),
         label = "segmentTint"

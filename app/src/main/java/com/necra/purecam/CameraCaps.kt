@@ -407,11 +407,10 @@ object CameraCaps {
     private fun awbPreset(mode: Int): WbPreset? = when (mode) {
         CameraMetadata.CONTROL_AWB_MODE_INCANDESCENT -> WbPreset.INCANDESCENT
         CameraMetadata.CONTROL_AWB_MODE_FLUORESCENT -> WbPreset.FLUORESCENT
-        CameraMetadata.CONTROL_AWB_MODE_WARM_FLUORESCENT -> WbPreset.WARM_FLUORESCENT
         CameraMetadata.CONTROL_AWB_MODE_DAYLIGHT -> WbPreset.DAYLIGHT
         CameraMetadata.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT -> WbPreset.CLOUDY_DAYLIGHT
         CameraMetadata.CONTROL_AWB_MODE_TWILIGHT -> WbPreset.TWILIGHT
-        CameraMetadata.CONTROL_AWB_MODE_SHADE -> WbPreset.SHADE
+        CameraMetadata.CONTROL_AWB_MODE_SHADE -> WbPreset.MOONLIGHT
         else -> null
     }
 

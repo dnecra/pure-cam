@@ -1,8 +1,11 @@
 package com.necra.purecam.ui
 
 import android.content.Context
+import android.graphics.Outline
 import android.graphics.SurfaceTexture
+import android.view.View
 import android.view.TextureView
+import android.view.ViewOutlineProvider
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -22,6 +25,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -113,6 +117,17 @@ internal fun CameraPreview(
 
 /** Keeps the camera-provided sensor rotation without applying a selfie mirror. */
 private class PreviewTextureView(context: Context) : TextureView(context) {
+    init {
+        // 18 dp circle radius + the controls' 10 dp inset from the viewfinder edge.
+        val cornerRadius = 28f * resources.displayMetrics.density
+        outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setRoundRect(0, 0, view.width, view.height, cornerRadius)
+            }
+        }
+        clipToOutline = true
+    }
+
     fun configurePreview() {
         // TextureView already applies SENSOR_ORIENTATION through its SurfaceTexture matrix.
         // Keep the preview unmirrored and let the camera-provided orientation stand.
@@ -151,7 +166,7 @@ private fun FocusIndicator(point: Offset?, pulse: Int, ringSizePx: Float) {
                 scaleX = scale.value
                 scaleY = scale.value
             }
-            .border(1.5.dp, Color.White.copy(alpha = 0.95f), CircleShape)
+            .border(1.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.95f), CircleShape)
     )
 }
 
@@ -175,15 +190,15 @@ private fun CaptureFlash(viewModel: CameraViewModel) {
 @Composable
 internal fun GridOverlay(visible: Boolean) {
     if (!visible) return
+    val gridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.32f)
     Canvas(modifier = Modifier.fillMaxSize()) {
-        val line = Color.White.copy(alpha = 0.32f)
         val stroke = 1.dp.toPx()
         val w = size.width
         val h = size.height
-        drawLine(line, Offset(w / 3f, 0f), Offset(w / 3f, h), stroke)
-        drawLine(line, Offset(w * 2f / 3f, 0f), Offset(w * 2f / 3f, h), stroke)
-        drawLine(line, Offset(0f, h / 3f), Offset(w, h / 3f), stroke)
-        drawLine(line, Offset(0f, h * 2f / 3f), Offset(w, h * 2f / 3f), stroke)
+        drawLine(gridColor, Offset(w / 3f, 0f), Offset(w / 3f, h), stroke)
+        drawLine(gridColor, Offset(w * 2f / 3f, 0f), Offset(w * 2f / 3f, h), stroke)
+        drawLine(gridColor, Offset(0f, h / 3f), Offset(w, h / 3f), stroke)
+        drawLine(gridColor, Offset(0f, h * 2f / 3f), Offset(w, h * 2f / 3f), stroke)
     }
 }
 
@@ -206,7 +221,7 @@ internal fun CountdownOverlay(countdown: Int?) {
                 text = value.toString(),
                 fontSize = 104.sp,
                 fontWeight = FontWeight.Thin,
-                color = Color.White
+                color = MaterialTheme.colorScheme.onSurface
             )
         }
     }

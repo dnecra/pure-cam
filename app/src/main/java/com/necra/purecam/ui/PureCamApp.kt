@@ -35,7 +35,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.FrameRateCategory
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.preferredFrameRate
@@ -92,7 +91,7 @@ fun PureCamApp(viewModel: CameraViewModel) {
 
     Surface(
         modifier = Modifier.fillMaxSize().preferredFrameRate(FrameRateCategory.High),
-        color = Color.Black
+        color = MaterialTheme.colorScheme.surfaceDim
     ) {
         if (state.hasPermission) {
             GoogleCameraScreen(

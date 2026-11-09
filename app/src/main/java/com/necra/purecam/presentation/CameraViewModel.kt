@@ -60,7 +60,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
             timer = prefs.timer,
             lastPhoto = prefs.lastPhoto,
             lastMediaIsVideo = prefs.lastMediaIsVideo,
-            captureMode = prefs.captureMode,
+            captureMode = CaptureMode.PHOTO,
             videoQuality = prefs.videoQuality,
             videoFps = prefs.videoFps,
             aspectMode = prefs.aspectMode,
@@ -98,6 +98,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     private var audioPermissionAsked = false
     private var pendingRecordConfig: VideoConfig? = null
     private var restoredWbCameraId: String? = null
+
+    init {
+        // Capture mode is a session choice: always start a fresh app launch in photo mode.
+        prefs.captureMode = CaptureMode.PHOTO
+    }
 
     // ------------------------------------------------------------------ host lifecycle
 
