@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -48,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.necra.purecam.presentation.CameraSignal
+import com.necra.purecam.presentation.PreviewState
 import com.necra.purecam.presentation.CameraViewModel
 import kotlin.math.roundToInt
 
@@ -57,6 +59,7 @@ internal fun CameraPreview(
     viewModel: CameraViewModel,
     onTap: ((Offset) -> Unit)? = null
 ) {
+    val previewState by viewModel.previewState.collectAsState(initial = PreviewState())
     val density = LocalDensity.current
     val focusRingSize = with(density) { 76.dp.toPx() }
     var focusPoint by remember { mutableStateOf<Offset?>(null) }
@@ -86,14 +89,15 @@ internal fun CameraPreview(
             factory = { context ->
                 PreviewTextureView(context).apply {
                     viewModel.attachPreview(this)
+                    configurePreview(previewState.facing == com.necra.purecam.core.Facing.FRONT)
                     surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                         override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                            configurePreview()
+                            configurePreview(previewState.facing == com.necra.purecam.core.Facing.FRONT)
                             viewModel.onPreviewSurfaceAvailable(surface)
                         }
 
                         override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
-                            configurePreview()
+                            configurePreview(previewState.facing == com.necra.purecam.core.Facing.FRONT)
                         }
 
                         override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
@@ -106,7 +110,7 @@ internal fun CameraPreview(
                 }
             },
             update = { view ->
-                view.configurePreview()
+                view.configurePreview(previewState.facing == com.necra.purecam.core.Facing.FRONT)
             }
         )
 
@@ -128,11 +132,10 @@ private class PreviewTextureView(context: Context) : TextureView(context) {
         clipToOutline = true
     }
 
-    fun configurePreview() {
+    fun configurePreview(mirror: Boolean = false) {
         // TextureView already applies SENSOR_ORIENTATION through its SurfaceTexture matrix.
-        // Keep the preview unmirrored and let the camera-provided orientation stand.
         setTransform(null)
-        scaleX = 1f
+        scaleX = if (mirror) -1f else 1f
         scaleY = 1f
     }
 }

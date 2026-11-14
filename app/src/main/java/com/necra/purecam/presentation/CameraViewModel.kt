@@ -66,6 +66,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
             aspectMode = prefs.aspectMode,
             enabledWbPresets = prefs.enabledWbPresets,
             enabledOverlays = prefs.enabledOverlays,
+            frontCameraFlipSave = prefs.frontCameraFlipSave,
+            flashBehavior = prefs.flashBehavior,
             audioGranted = hasAudioPermission()
         )
     )
@@ -119,6 +121,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
             it.setCaptureAspectMode(_uiState.value.aspectMode)
             it.setDeviceRotation(_uiState.value.deviceRotation)
             it.setOverlays(_uiState.value.enabledOverlays)
+            it.setMirrorFrontPhotos(_uiState.value.frontCameraFlipSave)
+            it.setLateFlashBehavior(_uiState.value.flashBehavior == FlashBehavior.LATE)
         }
         startIfAllowed()
     }
@@ -342,6 +346,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         prefs.enabledOverlays = next
         _uiState.update { it.copy(enabledOverlays = next) }
         controller?.setOverlays(next)
+    }
+
+    fun setFrontCameraFlipSave(enabled: Boolean) {
+        prefs.frontCameraFlipSave = enabled
+        _uiState.update { it.copy(frontCameraFlipSave = enabled) }
+        controller?.setMirrorFrontPhotos(enabled)
+    }
+
+    fun setFlashBehavior(behavior: FlashBehavior) {
+        prefs.flashBehavior = behavior
+        _uiState.update { it.copy(flashBehavior = behavior) }
+        controller?.setLateFlashBehavior(behavior == FlashBehavior.LATE)
     }
 
     private fun wbCycleOptions(lens: LensProfile, state: CameraUiState): List<WhiteBalanceMode> =

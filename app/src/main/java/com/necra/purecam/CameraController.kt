@@ -125,6 +125,8 @@ class CameraController(
     /** Procedural film effects applied to the saved still; never touches the camera pipeline. */
     @Volatile
     private var overlayStyles: Set<OverlayStyle> = emptySet()
+    @Volatile private var mirrorFrontPhotos = true
+    @Volatile private var lateFlashBehavior = false
 
     private var surfaceReady = false
     private var previewSurface: Surface? = null
@@ -281,6 +283,14 @@ class CameraController(
 
     fun setOverlays(styles: Set<OverlayStyle>) {
         overlayStyles = styles
+    }
+
+    fun setMirrorFrontPhotos(enabled: Boolean) {
+        mirrorFrontPhotos = enabled
+    }
+
+    fun setLateFlashBehavior(enabled: Boolean) {
+        lateFlashBehavior = enabled
     }
 
     fun setCaptureAspectMode(mode: CaptureAspectMode) {
@@ -1167,8 +1177,17 @@ class CameraController(
         val manualShutter = (s.exposure as? ExposureMode.Manual)?.shutterNs
         mainHandler.post { listener.onCaptureStarted(manualShutter) }
 
+        // Run the AE precapture sequence whenever flash will fire on a still with auto exposure.
+        // The sequence lets AE meter the scene with the preflash so the main flash exposure is
+        // correct. The guard previously excluded devices where neither AE-managed flash mode is
+        // advertised (alwaysFlashSupported/autoFlashSupported both false), but those devices still
+        // respond to CONTROL_AE_PRECAPTURE_TRIGGER and fire FLASH_MODE_SINGLE on the still request,
+        // so skipping precapture on them caused the same overexposure problem. The precapture
+        // request itself already falls back to plain AeMode.AUTO on such devices (via the
+        // flashMetering path in RequestBuilder), which is sufficient for the HAL to adjust.
+        val supportsAeFlash = s.lens.autoFlashSupported || s.lens.alwaysFlashSupported
         val needAe = s.exposure is ExposureMode.Auto && s.flash && s.lens.flashAvailable &&
-            (s.lens.alwaysFlashSupported || s.lens.autoFlashSupported)
+            (!lateFlashBehavior || supportsAeFlash)
         val needLens = s.focus is FocusMode.Manual
         val now = SystemClock.elapsedRealtime()
         val deadline = now + when {
@@ -1355,7 +1374,8 @@ class CameraController(
                 previewClamp = false,
                 focusAssist = false,
                 fallbackTransform = lastTransform,
-                exposureCompensation = exposureCompensationSteps
+                exposureCompensation = exposureCompensationSteps,
+                lateFlashBehavior = lateFlashBehavior
             )
             val builder = d.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
             builder.addTarget(r.surface)
@@ -1552,7 +1572,11 @@ class CameraController(
             // seconds on a busy device, so stop it here; saving reports its own result.
             captureWatchdog?.let { cameraHandler.removeCallbacks(it) }
             captureWatchdog = null
-            saver.save(bytes, image.width, image.height, overlays = overlayStyles)
+            saver.save(
+                bytes, image.width, image.height,
+                overlays = overlayStyles,
+                mirrorHorizontal = mirrorFrontPhotos && (state?.lens?.facing ?: facing) == Facing.FRONT
+            )
             // The camera is ready for the next frame now. Let the independent save worker finish
             // writing the original JPEG without keeping the shutter UI in a busy state.
             finishCapture(null, null)

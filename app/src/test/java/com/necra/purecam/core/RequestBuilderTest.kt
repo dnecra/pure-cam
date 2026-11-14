@@ -156,7 +156,10 @@ class RequestBuilderTest {
         val still = build(state)
 
         assertEquals(AeMode.AUTO, still.aeMode)
-        assertFalse(still.needPrecapture)
+        // Precapture is still required even without an AE-managed flash mode: the HAL adjusts
+        // exposure in response to CONTROL_AE_PRECAPTURE_TRIGGER regardless of the AE flash mode,
+        // so skipping it caused overexposure when only FLASH_MODE_SINGLE is available.
+        assertTrue(still.needPrecapture)
         // Without any AE flash mode the LED is forced directly on the still request.
         assertTrue(still.flashSingle)
     }

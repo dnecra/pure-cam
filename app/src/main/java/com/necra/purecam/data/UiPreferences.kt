@@ -10,6 +10,7 @@ import com.necra.purecam.core.OverlayStyle
 import com.necra.purecam.core.WhiteBalanceMode
 import com.necra.purecam.presentation.CaptureMode
 import com.necra.purecam.presentation.TimerMode
+import com.necra.purecam.presentation.FlashBehavior
 
 /** Small persisted UI preferences. Kept out of the camera code so it stays framework-light. */
 class UiPreferences(context: Context) {
@@ -113,6 +114,26 @@ class UiPreferences(context: Context) {
             .putStringSet(KEY_ENABLED_OVERLAYS, value.map { it.name }.toSet())
             .apply()
 
+    /**
+     * When true the front-camera JPEG is flipped horizontally before saving, so the photo
+     * matches what the user saw in the preview (mirror image). Default on — matches stock
+     * camera behaviour. The user can turn this off to save the unmirrored sensor image.
+     */
+    var frontCameraFlipSave: Boolean
+        get() = prefs.getBoolean(KEY_FRONT_FLIP_SAVE, true)
+        set(value) = prefs.edit().putBoolean(KEY_FRONT_FLIP_SAVE, value).apply()
+
+    var flashBehavior: FlashBehavior
+        get() = runCatching {
+            FlashBehavior.valueOf(prefs.getString(KEY_FLASH_BEHAVIOR, FlashBehavior.NORMAL.name)!!)
+        }.getOrDefault(FlashBehavior.NORMAL)
+        set(value) = prefs.edit().putString(KEY_FLASH_BEHAVIOR, value.name).apply()
+
+    /**
+     * When true the live preview is also horizontally mirrored for the front camera,
+     * matching what most stock cameras show. Off by default — the standard (unmirrored)
+     * sensor view.
+     */
     private companion object {
         const val KEY_GRID = "grid"
         const val KEY_TIMER = "timer"
@@ -127,6 +148,8 @@ class UiPreferences(context: Context) {
         const val KEY_WB_KELVIN = "white_balance_kelvin"
         const val KEY_ENABLED_WB_PRESETS = "enabled_wb_presets"
         const val KEY_ENABLED_OVERLAYS = "enabled_overlays"
+        const val KEY_FRONT_FLIP_SAVE = "front_camera_flip_save"
+        const val KEY_FLASH_BEHAVIOR = "flash_behavior"
         const val WB_AUTO = "auto"
         const val WB_PRESET = "preset"
         const val WB_KELVIN = "kelvin"

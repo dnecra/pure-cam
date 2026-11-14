@@ -16,6 +16,7 @@ import com.necra.purecam.core.OverlayStyle
 import com.necra.purecam.core.WbPreset
 
 enum class CaptureMode { PHOTO, VIDEO }
+enum class FlashBehavior { NORMAL, LATE }
 
 /**
  * Minimal snapshot consumed by the live preview surface. Carried by a separate
@@ -58,7 +59,10 @@ data class CameraUiState(
     val enabledWbPresets: Set<WbPreset> = setOf(WbPreset.DAYLIGHT),
     /** Procedural film overlays drawn onto saved stills. Independent from WB. */
     val enabledOverlays: Set<OverlayStyle> = emptySet(),
-    val audioGranted: Boolean = false
+    val audioGranted: Boolean = false,
+    /** Mirror the saved JPEG horizontally when the front camera was used (default true). */
+    val frontCameraFlipSave: Boolean = true,
+    val flashBehavior: FlashBehavior = FlashBehavior.NORMAL,
 ) {
     val lens: LensProfile? get() = cameraState?.lens
 

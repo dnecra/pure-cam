@@ -87,7 +87,8 @@ object RequestBuilder {
         videoFpsRange: RangeI? = null,
         videoMode: Boolean = false,
         exposureCompensation: Int? = null,
-        flashMetering: Boolean = false
+        flashMetering: Boolean = false,
+        lateFlashBehavior: Boolean = false
     ): RequestSpec {
         val manual = state.exposure as? ExposureMode.Manual
         val useManual = manual != null && profile.supportsManualExposure
@@ -230,8 +231,12 @@ object RequestBuilder {
             crop = crop,
             jpegQuality = NoProcessingFlags.JPEG_QUALITY,
             thumbnailSize = NoProcessingFlags.THUMBNAIL_SIZE,
+            // Precapture is needed for any flash still with auto exposure: the AE trigger lets
+            // the HAL meter correctly before the main flash fires. The old guard that required
+            // alwaysFlashSupported || autoFlashSupported was too narrow — devices that only
+            // support FLASH_MODE_SINGLE still respond to CONTROL_AE_PRECAPTURE_TRIGGER.
             needPrecapture = !preview && !record && flashOn && !useManual &&
-                (profile.alwaysFlashSupported || profile.autoFlashSupported),
+                (!lateFlashBehavior || profile.autoFlashSupported || profile.alwaysFlashSupported),
             manualExposure = useManual,
             approximatePreview = approximate,
             relativeZoom = state.zoom

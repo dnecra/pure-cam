@@ -61,6 +61,7 @@ import com.necra.purecam.core.WbPreset
 import com.necra.purecam.core.WhiteBalanceMode
 import com.necra.purecam.presentation.CameraUiState
 import com.necra.purecam.presentation.CameraViewModel
+import com.necra.purecam.presentation.FlashBehavior
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.graphics.Typeface
@@ -270,6 +271,48 @@ fun CaptureSettingsSheet(
                                             size = 16.sp
                                         )
                                     }
+                                }
+                            }
+                        }
+
+                        SettingRow(
+                            stringResource(R.string.front_camera),
+                            if (state.frontCameraFlipSave) stringResource(R.string.front_mirror_save_on)
+                            else stringResource(R.string.front_mirror_save_off)
+                        ) {
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                TextPill(
+                                    label = stringResource(R.string.front_mirror_save),
+                                    selected = state.frontCameraFlipSave,
+                                    enabled = true,
+                                    onClick = { viewModel.setFrontCameraFlipSave(!state.frontCameraFlipSave) }
+                                )
+                            }
+                        }
+
+                        SettingRow(
+                            stringResource(R.string.flash_behavior),
+                            if (state.flashBehavior == FlashBehavior.NORMAL) stringResource(R.string.flash_behavior_normal)
+                            else stringResource(R.string.flash_behavior_late)
+                        ) {
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                FlashBehavior.entries.forEach { behavior ->
+                                    val selected = state.flashBehavior == behavior
+                                    TextPill(
+                                        label = if (behavior == FlashBehavior.NORMAL) stringResource(R.string.flash_behavior_normal)
+                                        else stringResource(R.string.flash_behavior_late),
+                                        selected = selected,
+                                        enabled = true,
+                                        onClick = { viewModel.setFlashBehavior(behavior) }
+                                    )
                                 }
                             }
                         }
