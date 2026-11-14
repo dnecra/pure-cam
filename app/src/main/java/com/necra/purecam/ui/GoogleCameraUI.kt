@@ -405,7 +405,7 @@ private fun defaultSpec(state: CameraUiState): String? = if (state.videoMode) {
 } else {
     state.plan?.let {
         val base = "JPG · ${aspectRatioLabel(it.displayAspect)}"
-        if (state.enabledOverlays.isNotEmpty()) "$base · Overlay enabled" else base
+        if (state.enabledOverlays.isNotEmpty()) "$base · with Overlay" else base
     }
 }
 

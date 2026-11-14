@@ -57,7 +57,7 @@
     <string name="overlay_active_count">%1$d active</string>
     <!-- Front camera -->
     <string name="front_camera">Front camera</string>
-    <string name="front_mirror_save">Mirror saved photo</string>
+    <string name="front_mirror_save">Mirrored</string>
     <string name="front_mirror_save_on">Mirrored</string>
     <string name="front_mirror_save_off">As captured</string>
     <string name="flash_behavior">Flash behavior</string>

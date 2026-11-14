@@ -137,11 +137,8 @@ fun CaptureSettingsSheet(
                     ) {
                         Box(
                             Modifier
-                                .align(Alignment.CenterHorizontally)
-                                .width(44.dp)
-                                .height(5.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f))
+                                .fillMaxWidth()
+                                .height(36.dp)
                                 .pointerInput(Unit) {
                                     var drag = 0f
                                     detectVerticalDragGestures(
@@ -155,8 +152,17 @@ fun CaptureSettingsSheet(
                                         onDragEnd = { drag = 0f },
                                         onDragCancel = { drag = 0f }
                                     )
-                                }
-                        )
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                Modifier
+                                    .width(44.dp)
+                                    .height(5.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f))
+                            )
+                        }
 
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text(

@@ -92,7 +92,7 @@ enum class WbPreset(val label: String, val cct: Int, val symbol: String) {
  * the unprocessed frame.
  */
 enum class OverlayStyle(val label: String, val symbol: String) {
-    DUST("Dust & noise", "grain"),
+    DUST("Dust", "grain"),
     BURN_IN("Burn-in", "local_fire_department"),
     LIGHT_LEAK("Light leak", "flare")
 }
