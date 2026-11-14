@@ -50,9 +50,9 @@ class PhotoSaver(
                 // pixels directly uses sensor axes, which becomes a vertical flip when the
                 // JPEG is rotated for portrait display.
                 val payload = if (mirrorHorizontal) {
-                    afterOverlays
-                } else {
                     mirrorJpeg(afterOverlays) ?: afterOverlays
+                } else {
+                    afterOverlays
                 }
                 val now = System.currentTimeMillis()
                 val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(timestamp))

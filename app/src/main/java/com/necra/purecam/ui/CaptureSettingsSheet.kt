@@ -11,7 +11,6 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +26,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -45,13 +49,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.necra.purecam.R
@@ -80,6 +84,8 @@ fun CaptureSettingsSheet(
     var previousWb by remember { mutableStateOf<WhiteBalanceMode?>(null) }
     var transientWbIndicator by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val scrollState = rememberScrollState()
+    val dragDismissThreshold = with(LocalDensity.current) { 52.dp.toPx() }
     var wbIndicatorJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val showWbIndicator: (String) -> Unit = { label ->
         wbIndicatorJob?.cancel()
@@ -112,6 +118,25 @@ fun CaptureSettingsSheet(
             }
         }
     }
+    var downwardDrag by remember { mutableStateOf(0f) }
+    val dismissOnDownwardDrag = remember(scrollState, dismiss, dragDismissThreshold) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y > 0f && scrollState.value == 0) {
+                    downwardDrag += available.y
+                    if (downwardDrag > dragDismissThreshold) dismiss()
+                    return Offset(0f, available.y)
+                }
+                if (available.y < 0f || scrollState.value > 0) downwardDrag = 0f
+                return Offset.Zero
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                downwardDrag = 0f
+                return Velocity.Zero
+            }
+        }
+    }
 
     Dialog(
         onDismissRequest = dismiss,
@@ -124,35 +149,24 @@ fun CaptureSettingsSheet(
                 exit = slideOutVertically(tween(220)) { it } + fadeOut(tween(160))
             ) {
                 Surface(
-                    modifier = Modifier.fillMaxWidth().navigationBarsPadding(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .nestedScroll(dismissOnDownwardDrag),
                     shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
                     color = MaterialTheme.colorScheme.surface
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .verticalScroll(rememberScrollState())
+                            .verticalScroll(scrollState)
                             .padding(start = 20.dp, top = 14.dp, end = 20.dp, bottom = 32.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         Box(
                             Modifier
                                 .fillMaxWidth()
-                                .height(36.dp)
-                                .pointerInput(Unit) {
-                                    var drag = 0f
-                                    detectVerticalDragGestures(
-                                        onVerticalDrag = { _, amount ->
-                                            drag += amount
-                                            if (drag > 52.dp.toPx()) {
-                                                drag = 0f
-                                                dismiss()
-                                            }
-                                        },
-                                        onDragEnd = { drag = 0f },
-                                        onDragCancel = { drag = 0f }
-                                    )
-                                },
+                                .height(36.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Box(

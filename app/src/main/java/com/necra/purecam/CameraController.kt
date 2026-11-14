@@ -1625,7 +1625,10 @@ class CameraController(
             saver.save(
                 bytes, image.width, image.height,
                 overlays = overlayStyles,
-                mirrorHorizontal = mirrorFrontPhotos && (state?.lens?.facing ?: facing) == Facing.FRONT
+                // Front camera output is already mirrored on this device. Keep those pixels
+                // for the Mirrored option; flip them only when the user chooses As previewed.
+                mirrorHorizontal = !mirrorFrontPhotos &&
+                    (state?.lens?.facing ?: facing) == Facing.FRONT
             )
             // The camera is ready for the next frame now. Let the independent save worker finish
             // writing the original JPEG without keeping the shutter UI in a busy state.
