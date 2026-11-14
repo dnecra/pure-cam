@@ -240,6 +240,7 @@ fun GoogleCameraUI(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
+                            .offset(y = (-32).dp)
                             // The card is inset 10 dp; 14 more puts the gallery and flip buttons
                             // on the same 24 dp screen guides as the settings/WB buttons.
                             .padding(horizontal = 14.dp, vertical = 12.dp),

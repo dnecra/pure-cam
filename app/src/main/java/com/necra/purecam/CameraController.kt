@@ -58,6 +58,26 @@ private const val ZOOM_REQUEST_INTERVAL_MS = 8L
  * expose the intermediate state.
  */
 private const val PRECAPTURE_ENTER_TIMEOUT_MS = 900L
+private const val AE_SETTLED_RESULT_COUNT = 2
+
+/**
+ * Normal flash exposure. The device does not give flash-aware AE for stills, and a preflash
+ * precapture only produced a second visible flash whose metering the still then ignored. So
+ * Normal exposes the still deterministically for the flash: a short, fixed shutter and an ISO
+ * that follows flash falloff (light drops with distance squared). Tune these on the device.
+ */
+/**
+ * Sensors read out row by row (rolling shutter) and the LED pulse is short. If the exposure is
+ * shorter than readout time + pulse, only the rows whose exposure window overlaps the pulse are
+ * lit (a bright band, the rest dark). The exposure must be long enough for EVERY row to overlap
+ * the pulse. The flash energy is fixed, so a longer shutter does not brighten the flash itself.
+ */
+private const val FLASH_STILL_SHUTTER_NS = 66_666_667L  // 1/15 s; raise if a band remains
+private const val FLASH_STILL_ISO_AT_1M = 100.0         // ISO at 1 m subject distance
+private const val FLASH_STILL_MAX_ISO = 800
+private const val FLASH_SUBJECT_MIN_M = 0.3
+private const val FLASH_SUBJECT_MAX_M = 3.0
+private const val FLASH_SUBJECT_DEFAULT_M = 1.5
 
 class CameraController(
     private val context: Context,
@@ -158,6 +178,9 @@ class CameraController(
      * 2 = preflash observed and waiting for it to finish.
      */
     private var precapturePhase = 0
+    /** Consecutive distinct capture results confirming settled AE after the preflash. */
+    private var settledAeResultCount = 0
+    private var lastAeResultFrameNumber = -1L
     /** Wall clock when the precapture trigger was submitted, for the compatibility fallback. */
     private var precaptureTriggerMs = 0L
     /** Throttles the settling debug log so a long preflash does not flood logcat. */
@@ -437,6 +460,28 @@ class CameraController(
             exposureCompensationSteps = steps
             applyPreview()
         }
+    }
+
+    /**
+     * Manual exposure for a Normal flash still, or null when the lens cannot do manual sensor
+     * control (then the precapture path with plain AE is used). Subject distance comes from the
+     * lens focus distance reported by continuous AF.
+     */
+    private fun normalFlashStillExposure(s: CameraState): ExposureMode.Manual? {
+        if (lateFlashBehavior || !s.flash || !s.lens.flashAvailable) return null
+        if (s.exposure !is ExposureMode.Auto || !s.lens.supportsManualExposure) return null
+        val isoRange = s.lens.isoRange ?: return null
+        val exposureRange = s.lens.exposureRange ?: return null
+        val diopters = latestReadout?.focusDiopters
+        val meters = if (diopters != null && diopters > 0.01f) {
+            (1.0 / diopters).coerceIn(FLASH_SUBJECT_MIN_M, FLASH_SUBJECT_MAX_M)
+        } else FLASH_SUBJECT_DEFAULT_M
+        val iso = (FLASH_STILL_ISO_AT_1M * meters * meters)
+            .coerceAtMost(FLASH_STILL_MAX_ISO.toDouble()).roundToInt()
+        return ExposureMode.Manual(
+            isoRange.clamp(iso),
+            exposureRange.clamp(FLASH_STILL_SHUTTER_NS)
+        )
     }
 
     fun setExposure(mode: ExposureMode) {
@@ -1177,23 +1222,18 @@ class CameraController(
         val manualShutter = (s.exposure as? ExposureMode.Manual)?.shutterNs
         mainHandler.post { listener.onCaptureStarted(manualShutter) }
 
-        // Run the AE precapture sequence whenever flash will fire on a still with auto exposure.
-        // The sequence lets AE meter the scene with the preflash so the main flash exposure is
-        // correct. The guard previously excluded devices where neither AE-managed flash mode is
-        // advertised (alwaysFlashSupported/autoFlashSupported both false), but those devices still
-        // respond to CONTROL_AE_PRECAPTURE_TRIGGER and fire FLASH_MODE_SINGLE on the still request,
-        // so skipping precapture on them caused the same overexposure problem. The precapture
-        // request itself already falls back to plain AeMode.AUTO on such devices (via the
-        // flashMetering path in RequestBuilder), which is sufficient for the HAL to adjust.
-        val supportsAeFlash = s.lens.autoFlashSupported || s.lens.alwaysFlashSupported
-        val needAe = s.exposure is ExposureMode.Auto && s.flash && s.lens.flashAvailable &&
-            (!lateFlashBehavior || supportsAeFlash)
+        // Normal mode lets the HAL run and finish its AE/flash metering sequence before the
+        // forced single-flash still. Late mode intentionally skips metering and captures directly.
+        // Normal with manual sensor support needs no preflash/precapture at all (see
+        // normalFlashStillExposure): one flash, no extra delay.
+        val needAe = !lateFlashBehavior && s.exposure is ExposureMode.Auto &&
+            s.flash && s.lens.flashAvailable && normalFlashStillExposure(s) == null
         val needLens = s.focus is FocusMode.Manual
         val now = SystemClock.elapsedRealtime()
         val deadline = now + when {
             // A flash precapture needs the preflash to meter the scene and the flash unit to
             // recharge before the main flash. Slow HALs regularly need more than 1.6 s.
-            needAe -> 2_500L
+            needAe -> 4_000L
             needLens -> 1_100L
             else -> 0L
         }
@@ -1201,6 +1241,8 @@ class CameraController(
         // waiting for its passive AF state to change; capture with the current focus position.
         pending = PendingCapture(needAe, needLens, now, deadline)
         precapturePhase = if (needAe) 1 else 0
+        settledAeResultCount = 0
+        lastAeResultFrameNumber = -1L
         lastSettleKey = null
 
         if (needAe) {
@@ -1291,42 +1333,49 @@ class CameraController(
         // the preflash was still charging, so the main flash never had time to fire.
         if (p.needAe && precapturePhase == 1 && aeState == CameraMetadata.CONTROL_AE_STATE_PRECAPTURE) {
             precapturePhase = 2
+            settledAeResultCount = 0
             Log.i(tag, "precapture: preflash metering started")
         }
         val settled = aeState == CameraMetadata.CONTROL_AE_STATE_CONVERGED ||
             aeState == CameraMetadata.CONTROL_AE_STATE_LOCKED ||
             aeState == CameraMetadata.CONTROL_AE_STATE_FLASH_REQUIRED
-        val aeReady = if (!p.needAe) {
-            true
-        } else {
-            when (precapturePhase) {
-                2 -> aeState == null || aeState != CameraMetadata.CONTROL_AE_STATE_PRECAPTURE
-                1 -> {
-                    // Some devices never expose PRECAPTURE and jump straight to a settled
-                    // post-preflash state. After a sensible waiting period accept that.
-                    val waited = SystemClock.elapsedRealtime() - precaptureTriggerMs
-                    waited >= PRECAPTURE_ENTER_TIMEOUT_MS && settled
-                }
-                else -> false
-            }
+        // The AE preflash can consume the charge needed for the still. Let it recharge before
+        // submitting the final single-flash request when the HAL reports its flash state.
+        val flashReady = flashState == null ||
+            flashState == CameraMetadata.FLASH_STATE_UNAVAILABLE ||
+            flashState == CameraMetadata.FLASH_STATE_READY
+        val waitedForPreflash = SystemClock.elapsedRealtime() - precaptureTriggerMs
+        // Some HALs skip reporting PRECAPTURE. In that case, only start counting settled AE
+        // results after the entry timeout; never treat SEARCHING/INACTIVE (or a missing state)
+        // as completion. Require two distinct settled frames to avoid capturing on a transient.
+        val mayCountSettledResult = precapturePhase == 2 ||
+            (precapturePhase == 1 && waitedForPreflash >= PRECAPTURE_ENTER_TIMEOUT_MS)
+        if (mayCountSettledResult && settled && flashReady && result != null &&
+            result.frameNumber != lastAeResultFrameNumber) {
+            settledAeResultCount++
+            lastAeResultFrameNumber = result.frameNumber
+        } else if (!settled || !flashReady || aeState == CameraMetadata.CONTROL_AE_STATE_PRECAPTURE) {
+            settledAeResultCount = 0
         }
+        val aeReady = !p.needAe || settledAeResultCount >= AE_SETTLED_RESULT_COUNT
         val lensReady = !p.needLens || lensState == CameraMetadata.LENS_STATE_STATIONARY
         val timedOut = SystemClock.elapsedRealtime() >= p.deadlineMs
         if (capturing) {
-            val settleKey = "$precapturePhase/$aeState/$flashState/$aeReady/$timedOut"
+            val settleKey = "$precapturePhase/$aeState/$flashState/$settledAeResultCount/$aeReady/$flashReady/$timedOut"
             if (settleKey != lastSettleKey) {
                 lastSettleKey = settleKey
                 Log.d(
                     tag,
                     "settle phase=$precapturePhase ae=${aeStateName(aeState)} " +
-                        "flash=${flashStateName(flashState)} ready=$aeReady lens=$lensReady " +
+                        "flash=${flashStateName(flashState)} aeFrames=$settledAeResultCount/$AE_SETTLED_RESULT_COUNT " +
+                        "ready=$aeReady/$flashReady lens=$lensReady " +
                         "timedOut=$timedOut"
                 )
             }
         }
-        if (force || timedOut || (aeReady && lensReady)) {
-            if (force && !(aeReady && lensReady)) {
-                Log.w(tag, "capture settling timed out; firing anyway (ae=$aeReady lens=$lensReady)")
+        if (force || timedOut || (aeReady && lensReady && flashReady)) {
+            if ((force || timedOut) && !(aeReady && lensReady && flashReady)) {
+                Log.w(tag, "capture settling timed out; firing anyway (ae=$aeReady flash=$flashReady lens=$lensReady)")
             }
             fireCapture()
         }
@@ -1364,9 +1413,10 @@ class CameraController(
         settleTimeout = null
 
         val orientation = jpegOrientation()
+        val flashExposure = normalFlashStillExposure(s)
         val still = try {
             val spec = RequestBuilder.build(
-                state = s,
+                state = if (flashExposure != null) s.copy(exposure = flashExposure) else s,
                 profile = s.lens,
                 intent = CaptureIntent.STILL,
                 outputAspect = plan.outputAspect,
@@ -1403,7 +1453,7 @@ class CameraController(
 
         try {
             sess.capture(builder.build(), stillCallback, cameraHandler)
-            Log.i(tag, "still capture: iso=${spec.iso} shutter=${spec.exposureNs} ae=${spec.aeMode} flashSingle=${spec.flashSingle} flashState=${flashStateName(latestReadout?.flashState)} strategy=$effectiveStrategy orientation=$orientation rotation=$deviceRotation")
+            Log.i(tag, "still capture: iso=${spec.iso} shutter=${spec.exposureNs} ae=${spec.aeMode} flashSingle=${spec.flashSingle} flashState=${flashStateName(latestReadout?.flashState)} flashManual=${flashExposure != null} strategy=$effectiveStrategy orientation=$orientation rotation=$deviceRotation")
         } catch (t: Throwable) {
             Log.e(tag, "capture failed", t)
             failCapture("Capture failed: ${t.message}")

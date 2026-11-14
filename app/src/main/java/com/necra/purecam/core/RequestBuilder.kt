@@ -70,9 +70,10 @@ object RequestBuilder {
      * @param videoFpsRange AE target range advertised by the camera, when available. Preview
      *   uses it to request the chosen video rate or the fastest safe photo-preview range.
      * @param videoMode true while the screen is in video mode; the flash becomes a steady torch.
-     * @param flashMetering true for the one-shot precapture request: the request keeps the
-     *   preview target but uses the flash-capable AE mode so the HAL can run its preflash
-     *   metering sequence. Normal preview only arms AUTO_FLASH and never forces the LED.
+     * @param flashMetering true for the one-shot precapture request: use AE ON and
+     *   FLASH_MODE_SINGLE, matching the final still request so the HAL meters the same flash
+     *   configuration it will use for the photo. Normal preview only arms AUTO_FLASH and never
+     *   forces the LED.
      */
     fun build(
         state: CameraState,
@@ -95,6 +96,11 @@ object RequestBuilder {
         val flashOn = state.flash && profile.flashAvailable
         val preview = intent == CaptureIntent.PREVIEW
         val record = intent == CaptureIntent.RECORD
+        val aeManagedFlashMode = when {
+            profile.alwaysFlashSupported -> AeMode.ALWAYS_FLASH
+            profile.autoFlashSupported -> AeMode.AUTO_FLASH
+            else -> null
+        }
         val fps = (videoFps ?: VideoMath.DEFAULT_FPS).coerceIn(1, 240)
 
         val exposure = if (manual != null && useManual) {
@@ -129,17 +135,17 @@ object RequestBuilder {
             // Torch is a separate flash mode, so video keeps Auto exposure.
             record -> AeMode.AUTO
             !flashOn -> AeMode.AUTO
-            // The one-shot precapture request uses an AE flash mode when the device has one.
-            // Running it first lets AE meter the scene with the preflash.
-            flashMetering && profile.autoFlashSupported -> AeMode.AUTO_FLASH
-            flashMetering && profile.alwaysFlashSupported -> AeMode.ALWAYS_FLASH
+            // In Normal mode, use the camera's own AE-managed flash mode for precapture so the
+            // HAL can meter the scene before the main flash.
+            flashMetering -> aeManagedFlashMode ?: AeMode.AUTO
             // The repeating preview only needs to be flash-capable so the precapture handshake
             // can run. AUTO_FLASH arms the flash without firing it on every frame; forcing
             // ALWAYS_FLASH here would strobe the LED continuously.
             preview -> if (profile.autoFlashSupported) AeMode.AUTO_FLASH else AeMode.AUTO
-            // Still: force the LED with FLASH_MODE_SINGLE and plain auto exposure. Per the
-            // Camera2 contract that combination guarantees the flash fires, whereas this
-            // device ignores both ALWAYS_FLASH and AUTO_FLASH for still captures.
+            // Still: force the LED with FLASH_MODE_SINGLE and plain auto exposure. This is the
+            // only combination that reliably fires the LED on the still; ALWAYS_FLASH/AUTO_FLASH
+            // are ignored or fire during precapture instead on some HALs. Because plain AE is not
+            // flash-aware, Normal compensates with an adaptive EV bias (see CameraController).
             else -> AeMode.AUTO
         }
 
@@ -198,10 +204,10 @@ object RequestBuilder {
         return RequestSpec(
             intent = intent,
             aeMode = ae,
-            // Force the LED on every still capture while the flash toggle is on. This is the
-            // only combination the Camera2 contract guarantees will fire, and it works for
-            // manual exposure too because FLASH_MODE is valid when AE is OFF.
-            flashSingle = !preview && !record && flashOn,
+            // Force the main still pulse (Normal and Late). The Normal metering request also
+            // uses SINGLE when the device has no AE-managed flash mode.
+            flashSingle = !record && flashOn &&
+                (!preview || (flashMetering && aeManagedFlashMode == null)),
             torch = flashOn && (record || (preview && videoMode)),
             aeFps = when {
                 videoFpsRange != null -> videoFpsRange
@@ -231,12 +237,9 @@ object RequestBuilder {
             crop = crop,
             jpegQuality = NoProcessingFlags.JPEG_QUALITY,
             thumbnailSize = NoProcessingFlags.THUMBNAIL_SIZE,
-            // Precapture is needed for any flash still with auto exposure: the AE trigger lets
-            // the HAL meter correctly before the main flash fires. The old guard that required
-            // alwaysFlashSupported || autoFlashSupported was too narrow — devices that only
-            // support FLASH_MODE_SINGLE still respond to CONTROL_AE_PRECAPTURE_TRIGGER.
-            needPrecapture = !preview && !record && flashOn && !useManual &&
-                (!lateFlashBehavior || profile.autoFlashSupported || profile.alwaysFlashSupported),
+            // Normal uses AE precapture for accurate single-flash metering. Late deliberately
+            // keeps the direct, no-precapture capture path.
+            needPrecapture = !lateFlashBehavior && !preview && !record && flashOn && !useManual,
             manualExposure = useManual,
             approximatePreview = approximate,
             relativeZoom = state.zoom

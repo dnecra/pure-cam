@@ -314,7 +314,7 @@ fun CaptureSettingsSheet(
                                     val selected = state.flashBehavior == behavior
                                     TextPill(
                                         label = if (behavior == FlashBehavior.NORMAL) stringResource(R.string.flash_behavior_normal)
-                                        else stringResource(R.string.flash_behavior_late),
+                                        else stringResource(R.string.flash_behavior_early),
                                         selected = selected,
                                         enabled = true,
                                         onClick = { viewModel.setFlashBehavior(behavior) }

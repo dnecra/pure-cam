@@ -59,8 +59,9 @@
     <string name="front_camera">Front camera</string>
     <string name="front_mirror_save">Mirrored</string>
     <string name="front_mirror_save_on">Mirrored</string>
-    <string name="front_mirror_save_off">As captured</string>
+    <string name="front_mirror_save_off">As previewed</string>
     <string name="flash_behavior">Flash behavior</string>
     <string name="flash_behavior_normal">Normal</string>
-    <string name="flash_behavior_late">Late</string>
+    <string name="flash_behavior_late">Overexposed</string>
+    <string name="flash_behavior_early">Early</string>
 </resources>
