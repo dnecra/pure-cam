@@ -108,7 +108,7 @@ fun GoogleCameraUI(
     val lens = state.lens
     val lenses = state.lenses
     val flashOn = state.cameraState?.flash == true
-    val busy = state.capturing || state.recording || state.recordingStarting
+    val busy = state.capturing || state.recording || state.recordingStarting || state.savingVideo
     val canFlip = lens != null && state.catalog.lenses(
         if (lens.facing == Facing.BACK) Facing.FRONT else Facing.BACK
     ).isNotEmpty()
@@ -291,7 +291,7 @@ fun GoogleCameraUI(
                                 )
                             }
                             ShutterButton(
-                                capturing = state.capturing,
+                                capturing = state.capturing || state.savingVideo,
                                 recording = state.recording || state.recordingStarting,
                                 videoMode = state.videoMode,
                                 onClick = onShutter

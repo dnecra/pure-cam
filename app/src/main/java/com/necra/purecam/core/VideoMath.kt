@@ -122,6 +122,21 @@ object VideoMath {
     fun frameDurationNs(fps: Int): Long = 1_000_000_000L / fps.coerceIn(1, 240)
 
     /**
+     * Whether mirroring the *displayed* image horizontally means flipping the stored frames'
+     * horizontal axis.
+     *
+     * MP4 frames are stored in sensor orientation and the container carries a rotation hint that
+     * the player applies. For a 0/180 hint the display axes line up with the stored axes, so the
+     * stored X axis is flipped. For a 90/270 hint the image is shown rotated, so display-left/right
+     * corresponds to stored-top/bottom and the stored Y axis is flipped instead.
+     */
+    fun mirrorFlipsX(orientationHint: Int): Boolean =
+        OrientationMath.normalizeDegrees(orientationHint) % 180 == 0
+
+    /** See [mirrorFlipsX]; true when the stored vertical axis has to be flipped. */
+    fun mirrorFlipsY(orientationHint: Int): Boolean = !mirrorFlipsX(orientationHint)
+
+    /**
      * Manual exposure has to fit inside one video frame, otherwise the encoder gets frames
      * late and the clip plays back at the wrong speed. Brightness is preserved by raising ISO,
      * exactly like the preview clamp for stills.

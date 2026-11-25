@@ -96,6 +96,8 @@ class CameraController(
         fun onCaptureFinished(uri: Uri?, error: String?)
         fun onPhotoSaved(uri: Uri?, error: String?)
         fun onRecordingStarted(config: VideoConfig, withAudio: Boolean)
+        /** The clip stopped and is being finalized before [onRecordingFinished]. */
+        fun onRecordingSaving()
         fun onRecordingFinished(uri: Uri?, error: String?)
         fun onCameraError(message: String)
         fun onLensRemoved(removed: LensProfile, replacement: LensProfile?)
@@ -310,6 +312,54 @@ class CameraController(
 
     fun setMirrorFrontPhotos(enabled: Boolean) {
         mirrorFrontPhotos = enabled
+    }
+
+    /**
+     * Drops every control that is not a saved preference: lens choice, zoom, flash, manual
+     * exposure/focus and AE compensation. The saved white balance is kept, and the camera is
+     * moved back to the default (main back) lens like a cold start.
+     */
+    fun resetSessionState() {
+        cameraHandler.post {
+            if (recording || recordingStarting) finishRecording(save = true, reconfigure = false)
+            val leftVideoMode = videoMode
+            videoMode = false
+            pendingRecording = null
+            exposureCompensationSteps = 0
+            aeRegion = null
+            afRegion = null
+            pendingZoomRequest?.let { cameraHandler.removeCallbacks(it) }
+            pendingZoomRequest = null
+
+            val s = state ?: return@post
+            val targetFacing = if (catalog.lenses(Facing.BACK).isNotEmpty()) {
+                Facing.BACK
+            } else {
+                s.lens.facing
+            }
+            val lens = catalog.main(targetFacing) ?: s.lens
+            val next = CameraState.defaults(lens).copy(wb = s.wb).clamped()
+            facing = lens.facing
+            state = next
+            forceLogicalLensId = null
+            if (lens.id == s.lens.id && lens.cameraId == s.lens.cameraId) {
+                notifyState()
+                if (device == null) {
+                    // Paused: the next start() builds a session from this state.
+                } else if (leftVideoMode) {
+                    // Rebuild so the still-capable session and photo framing come back.
+                    closeSessionAndReader()
+                    createSession()
+                } else {
+                    applyPreview()
+                }
+            } else {
+                notifyCatalog()
+                notifyState()
+                closeCamera()
+                openCameraIfReady()
+            }
+        }
     }
 
     fun setLateFlashBehavior(enabled: Boolean) {
@@ -678,8 +728,11 @@ class CameraController(
 
         val rec = VideoRecorder(context)
         var usedAudio = withAudio
+        // The camera's recorder surface carries the raw (unmirrored) stream, matching the live
+        // preview. "Mirrored" therefore means flipping the clip, exactly like the photo path.
+        val mirrorVideo = mirrorFrontPhotos && lens.facing == Facing.FRONT
         val surface = try {
-            rec.open(config, videoOrientationHint(), withAudio)
+            rec.open(config, videoOrientationHint(), withAudio, mirrorVideo)
         } catch (first: Throwable) {
             if (!withAudio) {
                 Log.e(tag, "could not prepare video recorder", first)
@@ -691,7 +744,7 @@ class CameraController(
             Log.w(tag, "audio recording unavailable; retrying without sound", first)
             usedAudio = false
             try {
-                rec.open(config, videoOrientationHint(), false)
+                rec.open(config, videoOrientationHint(), false, mirrorVideo)
             } catch (second: Throwable) {
                 Log.e(tag, "could not prepare silent video recorder", second)
                 rec.release(deleteRow = true)
@@ -826,6 +879,10 @@ class CameraController(
         var uri: Uri? = null
         var error: String? = errorOverride
         if (save && wasRecording && errorOverride == null) {
+            if (rec.isMirroring) {
+                // Mirroring re-encodes the clip; tell the UI before the blocking finalize.
+                mainHandler.post { listener.onRecordingSaving() }
+            }
             try {
                 uri = rec.stop()
                 Log.i(tag, "recording saved: $uri")

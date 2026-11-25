@@ -11,15 +11,22 @@ import android.provider.MediaStore
 import android.util.Log
 import android.view.Surface
 import com.necra.purecam.core.VideoConfig
+import java.io.File
+import java.io.FileInputStream
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /**
- * Records the camera's recorder surface straight into MediaStore. Like [PhotoSaver] this does no
- * post-processing: MediaRecorder writes the MP4 itself from the frames Camera2 delivers, and the
- * pending MediaStore row is published only after the file has been finalized.
+ * Records the camera's recorder surface straight into MediaStore. MediaRecorder writes the MP4
+ * itself from the frames Camera2 delivers, and the pending MediaStore row is published only after
+ * the file has been finalized.
+ *
+ * Front-camera clips may additionally need one axis mirrored so the saved video matches the
+ * "Mirrored" preference. MediaRecorder has no mirror option, so in that case the clip is written
+ * to a cache file first, flipped by [VideoMirrorProcessor] and copied into MediaStore once the
+ * encoder has finished. If the flip fails the unmirrored recording is kept.
  */
 class VideoRecorder(private val context: Context) {
 
@@ -30,8 +37,14 @@ class VideoRecorder(private val context: Context) {
     private var dateTakenMs = 0L
     private var startedAtMs = 0L
     private var started = false
+    private var orientationHint = 0
+    private var mirror = false
+    private var tempFile: File? = null
 
     val isStarted: Boolean get() = started
+
+    /** True when [stop] has to re-encode the clip before publishing it. */
+    val isMirroring: Boolean get() = mirror
 
     fun elapsedMs(): Long =
         if (started) (SystemClock.elapsedRealtime() - startedAtMs).coerceAtLeast(0L) else 0L
@@ -40,12 +53,19 @@ class VideoRecorder(private val context: Context) {
      * Creates the pending MediaStore entry and prepares the encoder. Throws when the device
      * cannot record with the requested audio configuration; the caller may retry silently.
      */
-    fun open(config: VideoConfig, orientationHint: Int, withAudio: Boolean): Surface {
+    fun open(
+        config: VideoConfig,
+        orientationHint: Int,
+        withAudio: Boolean,
+        mirror: Boolean = false
+    ): Surface {
         check(recorder == null) { "Recorder already open" }
         val resolver = context.contentResolver
         val captureTime = System.currentTimeMillis()
         dateTakenMs = captureTime
         this.config = config
+        this.orientationHint = orientationHint
+        this.mirror = mirror
         val name = "VID_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(captureTime))}.mp4"
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, name)
@@ -59,16 +79,22 @@ class VideoRecorder(private val context: Context) {
         uri = row
 
         try {
-            val pfd = resolver.openFileDescriptor(row, "rw")
-                ?: throw IOException("Could not open MediaStore output")
-            descriptor = pfd
-
             val r = MediaRecorder(context)
             if (withAudio) r.setAudioSource(MediaRecorder.AudioSource.MIC)
             r.setVideoSource(MediaRecorder.VideoSource.SURFACE)
             r.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-            @Suppress("DEPRECATION")
-            r.setOutputFile(pfd.fileDescriptor)
+            if (mirror) {
+                // Post-processing needs a seekable file; MediaStore is filled after the flip.
+                val file = File(context.cacheDir, "rec-$captureTime.mp4")
+                tempFile = file
+                r.setOutputFile(file.absolutePath)
+            } else {
+                val pfd = resolver.openFileDescriptor(row, "rw")
+                    ?: throw IOException("Could not open MediaStore output")
+                descriptor = pfd
+                @Suppress("DEPRECATION")
+                r.setOutputFile(pfd.fileDescriptor)
+            }
             r.setVideoEncodingBitRate(config.bitRate)
             r.setVideoFrameRate(config.fps)
             r.setVideoSize(config.size.width, config.size.height)
@@ -85,7 +111,8 @@ class VideoRecorder(private val context: Context) {
             Log.i(
                 "PureCam/Video",
                 "prepared $name ${config.size} ${config.fps}fps " +
-                    "${config.bitRate / 1_000_000.0}Mbps audio=$withAudio orientation=$orientationHint"
+                    "${config.bitRate / 1_000_000.0}Mbps audio=$withAudio orientation=$orientationHint " +
+                    "mirror=$mirror"
             )
             return r.surface
         } catch (t: Throwable) {
@@ -113,6 +140,9 @@ class VideoRecorder(private val context: Context) {
         val durationMs = elapsedMs()
         val savedConfig = config
         val captureTime = dateTakenMs
+        val hint = orientationHint
+        val mirroring = mirror
+        val recorded = tempFile
         started = false
         try {
             if (!wasStarted) throw IllegalStateException("Recording never started")
@@ -124,8 +154,20 @@ class VideoRecorder(private val context: Context) {
             runCatching { context.contentResolver.delete(row, null, null) }
             throw if (t is IOException) t else IOException(t.message ?: "Could not finish the video", t)
         }
-        releaseInternal()
+        // The cache file is needed below when the clip must be mirrored.
+        releaseInternal(keepTemp = mirroring)
         uri = null
+        if (mirroring && recorded != null) {
+            try {
+                publishMirrored(row, recorded, hint)
+            } catch (t: Throwable) {
+                Log.e("PureCam/Video", "could not publish mirrored $row", t)
+                runCatching { context.contentResolver.delete(row, null, null) }
+                throw if (t is IOException) t else IOException(t.message ?: "Could not save the video", t)
+            } finally {
+                recorded.delete()
+            }
+        }
         try {
             context.contentResolver.update(
                 row,
@@ -164,7 +206,32 @@ class VideoRecorder(private val context: Context) {
         }
     }
 
-    private fun releaseInternal() {
+    /**
+     * Mirrors the finished clip and copies it into the pending MediaStore entry. Falls back to
+     * the unmirrored file when the device cannot transcode it, so the user never loses a clip.
+     */
+    private fun publishMirrored(row: Uri, recorded: File, hint: Int) {
+        val mirrored = File(context.cacheDir, "mirror-${System.nanoTime()}.mp4")
+        try {
+            val flipped = VideoMirrorProcessor.mirror(recorded, mirrored, hint)
+            if (!flipped) Log.w("PureCam/Video", "mirroring failed; saving the unmirrored clip")
+            val source = if (flipped) mirrored else recorded
+            val pfd = context.contentResolver.openFileDescriptor(row, "rw")
+                ?: throw IOException("Could not open MediaStore output")
+            // The pending row was never written to, so a plain copy starts at offset 0.
+            ParcelFileDescriptor.AutoCloseOutputStream(pfd).use { output ->
+                FileInputStream(source).use { input ->
+                    input.copyTo(output, DEFAULT_COPY_BUFFER)
+                }
+            }
+            // The clip is safely in MediaStore; free the cache copy.
+            if (flipped) recorded.delete()
+        } finally {
+            mirrored.delete()
+        }
+    }
+
+    private fun releaseInternal(keepTemp: Boolean = false) {
         recorder?.let { r ->
             runCatching { r.reset() }
             runCatching { r.release() }
@@ -172,7 +239,17 @@ class VideoRecorder(private val context: Context) {
         recorder = null
         config = null
         dateTakenMs = 0L
+        mirror = false
+        orientationHint = 0
         runCatching { descriptor?.close() }
         descriptor = null
+        // A stopped or cancelled recording must not leave cache files behind.
+        val file = tempFile
+        tempFile = null
+        if (!keepTemp) file?.delete()
+    }
+
+    private companion object {
+        const val DEFAULT_COPY_BUFFER = 256 * 1024
     }
 }

@@ -52,6 +52,13 @@ data class CameraUiState(
     val recording: Boolean = false,
     /** True between the record tap and the first encoder frame; a second tap means stop. */
     val recordingStarting: Boolean = false,
+    /** True while a finished clip is being finalized or mirrored before it is published. */
+    val savingVideo: Boolean = false,
+    /**
+     * Incremented whenever a fresh app open resets the session-only state. The UI keys its
+     * transient (non-preference) Compose state on this so a relaunch really starts clean.
+     */
+    val sessionGeneration: Int = 0,
     val videoQuality: VideoQuality = VideoQuality.FHD_1080P,
     val videoFps: Int = VideoMath.DEFAULT_FPS,
     val aspectMode: CaptureAspectMode = CaptureAspectMode.PORTRAIT_9_16,

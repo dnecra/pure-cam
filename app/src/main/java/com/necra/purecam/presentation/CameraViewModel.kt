@@ -150,6 +150,32 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         _uiState.update { it.copy(recording = false, recordingStarting = false) }
     }
 
+    /**
+     * Returns the session to its cold-start state without touching the user's saved
+     * preferences (grid, timer, aspect, video quality, white balance, overlays, flash behavior,
+     * front mirror and the last media item all stay).
+     *
+     * Called when the launcher re-opens the app, so reopening it — even when Android kept the
+     * process alive — always starts from the same defaults.
+     */
+    fun resetSession() {
+        // A pending audio request owns the next recording; leave it alone.
+        if (pendingRecordConfig != null) return
+        cancelCountdown()
+        prefs.captureMode = CaptureMode.PHOTO
+        exposureCompensation = 0f
+        currentZoom = 1f
+        _uiState.update {
+            it.copy(
+                captureMode = CaptureMode.PHOTO,
+                countdown = null,
+                zoom = 1f,
+                sessionGeneration = it.sessionGeneration + 1
+            )
+        }
+        controller?.resetSessionState()
+    }
+
     fun setPermission(granted: Boolean) {
         _uiState.update { it.copy(hasPermission = granted, permissionDenied = it.permissionDenied && !granted) }
         if (granted) startIfAllowed()
@@ -177,7 +203,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     // ------------------------------------------------------------------ intents
 
     fun setCaptureMode(mode: CaptureMode) {
-        if (_uiState.value.captureMode == mode || _uiState.value.recording || _uiState.value.recordingStarting) return
+        if (_uiState.value.captureMode == mode || _uiState.value.recording ||
+            _uiState.value.recordingStarting || _uiState.value.savingVideo
+        ) return
         if (mode == CaptureMode.VIDEO) {
             val canRecord = _uiState.value.supportsVideo ||
                 _uiState.value.lens?.let {
@@ -198,21 +226,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     }
 
     fun setVideoQuality(quality: VideoQuality) {
-        if (_uiState.value.recording) return
+        if (_uiState.value.recording || _uiState.value.savingVideo) return
         if (!_uiState.value.availableVideoQualities.contains(quality)) return
         prefs.videoQuality = quality
         _uiState.update { it.copy(videoQuality = quality) }
     }
 
     fun setVideoFps(fps: Int) {
-        if (_uiState.value.recording) return
+        if (_uiState.value.recording || _uiState.value.savingVideo) return
         if (!_uiState.value.availableVideoFps.contains(fps)) return
         prefs.videoFps = fps
         _uiState.update { it.copy(videoFps = fps) }
     }
 
     fun setCaptureAspectMode(mode: CaptureAspectMode) {
-        if (_uiState.value.aspectMode == mode || _uiState.value.recording || _uiState.value.recordingStarting) return
+        if (_uiState.value.aspectMode == mode || _uiState.value.recording ||
+            _uiState.value.recordingStarting || _uiState.value.savingVideo
+        ) return
         prefs.aspectMode = mode
         _uiState.update { it.copy(aspectMode = mode) }
         controller?.setCaptureAspectMode(mode)
@@ -265,13 +295,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     }
 
     fun flipCamera() {
-        if (_uiState.value.recording || _uiState.value.recordingStarting) return
+        if (_uiState.value.recording || _uiState.value.recordingStarting || _uiState.value.savingVideo) return
         cancelCountdown()
         controller?.flipFacing()
     }
 
     fun selectLens(lens: LensProfile) {
-        if (_uiState.value.recording || _uiState.value.recordingStarting) return
+        if (_uiState.value.recording || _uiState.value.recordingStarting || _uiState.value.savingVideo) return
         cancelCountdown()
         controller?.setLens(lens)
     }
@@ -365,8 +395,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
             .filter { lens.awbPresets.contains(it) && it in state.enabledWbPresets }
             .map { WhiteBalanceMode.Preset(it) }
 
-    /** Exposure compensation in EV, applied on top of auto exposure. */
+    /**
+     * Exposure compensation in EV, applied on top of auto exposure. Session-only: the slider
+     * keeps its position while the app stays open and resets with [resetSession].
+     */
+    var exposureCompensation: Float = 0f
+        private set
+
     fun setExposureCompensation(ev: Float) {
+        exposureCompensation = ev
         controller?.setExposureCompensation(ev)
     }
 
@@ -581,6 +618,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
             it.copy(
                 recording = true,
                 recordingStarting = false,
+                savingVideo = false,
                 videoQuality = config.quality,
                 videoFps = config.fps
             )
@@ -588,8 +626,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         if (!withAudio) emitMessage(message(R.string.recording_without_audio))
     }
 
+    override fun onRecordingSaving() {
+        // The clip is stopped but may still be mirrored/re-encoded before it is published.
+        _uiState.update { it.copy(recording = false, recordingStarting = false, savingVideo = true) }
+    }
+
     override fun onRecordingFinished(uri: Uri?, error: String?) {
-        _uiState.update { it.copy(recording = false, recordingStarting = false) }
+        _uiState.update { it.copy(recording = false, recordingStarting = false, savingVideo = false) }
         if (uri != null) {
             prefs.lastPhoto = uri
             prefs.lastMediaIsVideo = true

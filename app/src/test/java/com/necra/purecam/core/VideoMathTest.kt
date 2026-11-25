@@ -154,6 +154,26 @@ class VideoMathTest {
     }
 
     @Test
+    fun mirrorAxis_dependsOnTheContainerRotation() {
+        // 0/180: display axes match the stored frame, so the stored X axis is flipped.
+        assertTrue(VideoMath.mirrorFlipsX(0))
+        assertTrue(VideoMath.mirrorFlipsX(180))
+        assertFalse(VideoMath.mirrorFlipsY(0))
+        assertFalse(VideoMath.mirrorFlipsY(180))
+
+        // 90/270: the player rotates the frame, so a display left/right mirror is a stored Y flip.
+        assertFalse(VideoMath.mirrorFlipsX(90))
+        assertFalse(VideoMath.mirrorFlipsX(270))
+        assertTrue(VideoMath.mirrorFlipsY(90))
+        assertTrue(VideoMath.mirrorFlipsY(270))
+
+        // Degrees are normalised before choosing the axis.
+        assertFalse(VideoMath.mirrorFlipsX(450))
+        assertFalse(VideoMath.mirrorFlipsX(-90))
+        assertTrue(VideoMath.mirrorFlipsY(-90))
+    }
+
+    @Test
     fun formatting_isStable() {
         assertEquals("0:00", VideoMath.formatDuration(0))
         assertEquals("0:07", VideoMath.formatDuration(7_999))

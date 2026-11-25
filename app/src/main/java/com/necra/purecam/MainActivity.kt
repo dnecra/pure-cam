@@ -1,6 +1,7 @@
 package com.necra.purecam
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Bundle
@@ -58,6 +59,17 @@ class MainActivity : ComponentActivity() {
         orientationHelper.disable()
         cameraViewModel.onPause()
         super.onPause()
+    }
+
+    /**
+     * The launcher reuses this instance (see `launchMode="singleTask"`), so without this the
+     * session-only state would survive a relaunch while the process stays alive. Reset it here
+     * exactly like a cold start: the user's saved preferences are untouched.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        cameraViewModel.resetSession()
     }
 
     /**

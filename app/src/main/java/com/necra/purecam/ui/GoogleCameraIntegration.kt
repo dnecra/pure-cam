@@ -24,7 +24,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,13 +58,17 @@ fun GoogleCameraScreen(
     viewModel: CameraViewModel,
     onOpenPhoto: (Uri) -> Unit
 ) {
-    var settingsOpen by rememberSaveable { mutableStateOf(false) }
+    // Both are session state: a relaunch closes the sheet and drops any focus/exposure ring.
+    var settingsOpen by remember(state.sessionGeneration) { mutableStateOf(false) }
 
     // Tap point in preview pixels; the exposure slider is anchored next to it.
-    var focusPoint by remember { mutableStateOf<Offset?>(null) }
+    var focusPoint by remember(state.sessionGeneration) { mutableStateOf<Offset?>(null) }
     var previewSize by remember { mutableStateOf(IntSize.Zero) }
-    // Held in a MutableState so dragging only recomposes the slider, not the camera UI.
-    val exposureEv = rememberSaveable { mutableStateOf(0f) }
+    // Held in a MutableState so dragging only recomposes the slider, not the camera UI. Keyed on
+    // the session so a relaunch starts at 0 EV while the value survives rotation.
+    val exposureEv = remember(state.sessionGeneration) {
+        mutableStateOf(viewModel.exposureCompensation)
+    }
 
     GoogleCameraUI(
         state = state,
