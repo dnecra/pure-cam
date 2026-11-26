@@ -70,6 +70,12 @@ data class CameraUiState(
     /** Mirror the saved JPEG horizontally when the front camera was used (default true). */
     val frontCameraFlipSave: Boolean = true,
     val flashBehavior: FlashBehavior = FlashBehavior.NORMAL,
+    /** True = photos use the video recorder's auto exposure. */
+    val photoVideoExposure: Boolean = true,
+    /** Camera-embedded thumbnail of the newest shot, shown while the full file is still saving. */
+    val photoPreview: android.graphics.Bitmap? = null,
+    /** [lastPhoto] at the time [photoPreview] arrived; the preview stands in until it changes. */
+    val photoPreviewBase: android.net.Uri? = null,
 ) {
     val lens: LensProfile? get() = cameraState?.lens
 

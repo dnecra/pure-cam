@@ -89,7 +89,9 @@ object RequestBuilder {
         videoMode: Boolean = false,
         exposureCompensation: Int? = null,
         flashMetering: Boolean = false,
-        lateFlashBehavior: Boolean = false
+        lateFlashBehavior: Boolean = false,
+        jpegQuality: Int = NoProcessingFlags.JPEG_QUALITY,
+        thumbnailSize: SizeI? = null
     ): RequestSpec {
         val manual = state.exposure as? ExposureMode.Manual
         val useManual = manual != null && profile.supportsManualExposure
@@ -230,13 +232,22 @@ object RequestBuilder {
             frameDurationNs = if (record) {
                 VideoMath.frameDurationNs(fps)
             } else {
-                exposure?.let { ExposureMath.frameDurationNs(it.shutterNs, profile.maxFrameDurationNs) }
+                // Manual exposure has no AE range to honour, so a preview would be capped at
+                // 30 fps by the default frame duration. Follow the preview rate instead.
+                exposure?.let {
+                    val floorNs = if (preview && aeFpsRange != null) {
+                        VideoMath.frameDurationNs(aeFpsRange.max)
+                    } else {
+                        ExposureMath.DEFAULT_FRAME_NS
+                    }
+                    ExposureMath.frameDurationNs(it.shutterNs, profile.maxFrameDurationNs, floorNs)
+                }
             },
             postRawBoost = postRaw,
             zoomRatio = zoomRatio,
             crop = crop,
-            jpegQuality = NoProcessingFlags.JPEG_QUALITY,
-            thumbnailSize = NoProcessingFlags.THUMBNAIL_SIZE,
+            jpegQuality = jpegQuality.coerceIn(1, 100),
+            thumbnailSize = thumbnailSize ?: NoProcessingFlags.THUMBNAIL_SIZE,
             // Normal uses AE precapture for accurate single-flash metering. Late deliberately
             // keeps the direct, no-precapture capture path.
             needPrecapture = !lateFlashBehavior && !preview && !record && flashOn && !useManual,

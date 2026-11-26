@@ -43,6 +43,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -197,11 +198,23 @@ internal fun FlipButton(enabled: Boolean, rotationDegrees: Int, onClick: () -> U
 internal fun PhotoThumbnail(
     uri: android.net.Uri?,
     isVideo: Boolean,
-    onClick: (android.net.Uri) -> Unit
+    onClick: (android.net.Uri) -> Unit,
+    /** Camera-embedded thumbnail of the newest shot; stands in while its file is still saving. */
+    preview: android.graphics.Bitmap? = null,
+    /** The gallery uri that was current when [preview] arrived. */
+    previewBase: android.net.Uri? = null
 ) {
     val context = LocalContext.current
-    val thumbnail by produceState<ImageBitmap?>(initialValue = null, uri) {
-        value = withContext(Dispatchers.IO) { loadThumbnail(context, uri, 120) }
+    val loaded by produceState<Pair<android.net.Uri?, ImageBitmap?>>(initialValue = null to null, uri) {
+        value = uri to withContext(Dispatchers.IO) { loadThumbnail(context, uri, 120) }
+    }
+    // Only a thumbnail loaded for the current uri counts, so a stale one never flashes up.
+    val loadedThumbnail = loaded.takeIf { it.first == uri }?.second
+    val previewImage = remember(preview) { preview?.asImageBitmap() }
+    val thumbnail = if (previewImage != null && (uri == previewBase || loadedThumbnail == null)) {
+        previewImage
+    } else {
+        loadedThumbnail
     }
     val shape = CircleShape
     Box(

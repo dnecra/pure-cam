@@ -115,8 +115,12 @@ object ExposureMath {
     }
 
     /** Frame duration must be at least the exposure time and is bounded by the device maximum. */
-    fun frameDurationNs(shutterNs: Long, maxFrameDurationNs: Long): Long {
-        val minimum = max(DEFAULT_FRAME_NS, shutterNs)
+    fun frameDurationNs(
+        shutterNs: Long,
+        maxFrameDurationNs: Long,
+        minFrameNs: Long = DEFAULT_FRAME_NS
+    ): Long {
+        val minimum = max(minFrameNs, shutterNs)
         val max = maxFrameDurationNs.coerceAtLeast(shutterNs)
         return minimum.coerceAtMost(max)
     }

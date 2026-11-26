@@ -296,10 +296,11 @@ Suggested device checklist for the Compose build:
   chip for stills and disables or falls back on zoom.
 - The gallery thumbnail opens the system viewer rather than an in-app gallery.
 - Long exposures slow the preview and make it approximate by design.
-- Photo mode previews on a 30 fps-capable AE range rather than the highest advertised rate, so
-  auto exposure can lengthen the shutter in dim light. A flash-less still pins the same range and
-  waits (briefly) for AE to converge before firing, so the photo matches the preview and video
-  instead of inheriting a capped, darker exposure.
+- Photo mode previews on an AE range with a 30 fps floor instead of the highest advertised rate,
+  which used to cap exposure at 1/60 s. The floor keeps the viewfinder smooth while auto exposure
+  can still lengthen the shutter to 1/30 s in dim light. A flash-less still may pin a slower range
+  than the preview (capped at 1/10 s) and waits (briefly) for AE to converge before firing, so the
+  saved photo is not capped at the preview's frame rate.
 - The activity is portrait-locked; the orientation listener is quantised to 0/90/180/270, so
   a device lying flat can report an ambiguous rotation for that shot.
 - Release builds are unsigned and have no Play Store packaging.

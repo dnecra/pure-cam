@@ -123,6 +123,11 @@ class UiPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_FRONT_FLIP_SAVE, true)
         set(value) = prefs.edit().putBoolean(KEY_FRONT_FLIP_SAVE, value).apply()
 
+    /** True = photos use the video recorder's auto exposure; false = the standard still pipeline. */
+    var photoVideoExposure: Boolean
+        get() = prefs.getBoolean(KEY_PHOTO_VIDEO_EXPOSURE, true)
+        set(value) = prefs.edit().putBoolean(KEY_PHOTO_VIDEO_EXPOSURE, value).apply()
+
     var flashBehavior: FlashBehavior
         get() = runCatching {
             FlashBehavior.valueOf(prefs.getString(KEY_FLASH_BEHAVIOR, FlashBehavior.NORMAL.name)!!)
@@ -150,6 +155,7 @@ class UiPreferences(context: Context) {
         const val KEY_ENABLED_OVERLAYS = "enabled_overlays"
         const val KEY_FRONT_FLIP_SAVE = "front_camera_flip_save"
         const val KEY_FLASH_BEHAVIOR = "flash_behavior"
+        const val KEY_PHOTO_VIDEO_EXPOSURE = "photo_video_exposure"
         const val WB_AUTO = "auto"
         const val WB_PRESET = "preset"
         const val WB_KELVIN = "kelvin"

@@ -36,6 +36,7 @@ import com.necra.purecam.core.FocusMath
 import com.necra.purecam.core.FocusMode
 import com.necra.purecam.core.LensMode
 import com.necra.purecam.core.LensProfile
+import com.necra.purecam.core.SizeI
 import com.necra.purecam.core.ManualWhiteBalance
 import com.necra.purecam.core.OrientationMath
 import com.necra.purecam.core.OverlayStyle
@@ -72,6 +73,8 @@ private const val AE_SETTLED_RESULT_COUNT = 2
  * lit (a bright band, the rest dark). The exposure must be long enough for EVERY row to overlap
  * the pulse. The flash energy is fixed, so a longer shutter does not brighten the flash itself.
  */
+/** Quality of every saved still. */
+private const val STILL_JPEG_QUALITY = 80
 private const val FLASH_STILL_SHUTTER_NS = 66_666_667L  // 1/15 s; raise if a band remains
 private const val FLASH_STILL_ISO_AT_1M = 100.0         // ISO at 1 m subject distance
 private const val FLASH_STILL_MAX_ISO = 800
@@ -94,6 +97,8 @@ class CameraController(
         fun onPreviewReady(facing: Facing)
         fun onCaptureStarted(exposureNs: Long?)
         fun onCaptureFinished(uri: Uri?, error: String?)
+        /** Camera-embedded thumbnail of a shot, upright, delivered before the file is saved. */
+        fun onPhotoPreview(thumbnail: android.graphics.Bitmap)
         fun onPhotoSaved(uri: Uri?, error: String?)
         fun onRecordingStarted(config: VideoConfig, withAudio: Boolean)
         /** The clip stopped and is being finalized before [onRecordingFinished]. */
@@ -142,6 +147,9 @@ class CameraController(
     private var effectiveStrategy: LensMode = LensMode.LOGICAL
 
     private var facing: Facing = Facing.BACK
+    /** Camera to open on the first start when this controller has no state yet (null = back). */
+    @Volatile
+    private var initialFacing: Facing? = null
     private var started = false
     @Volatile
     private var captureAspectMode = CaptureAspectMode.PORTRAIT_9_16
@@ -151,6 +159,19 @@ class CameraController(
     private var overlayStyles: Set<OverlayStyle> = emptySet()
     @Volatile private var mirrorFrontPhotos = true
     @Volatile private var lateFlashBehavior = false
+
+    /**
+     * Photo exposure that follows the video recorder's auto exposure. The photo-mode viewfinder
+     * then runs the same request video uses (record template and intent, AE range pinned to the
+     * selected video frame rate), and a shot is taken with the exact ISO and shutter that AE
+     * converged to there, instead of the darker result the stock still pipeline settles on.
+     */
+    @Volatile private var videoStyleExposure = true
+    @Volatile private var videoFpsPreference = VideoMath.DEFAULT_FPS
+    /** Newest ISO/shutter AE chose on the repeating request; fed to stills in video style. */
+    @Volatile private var liveIso: Int? = null
+    @Volatile private var liveShutterNs: Long? = null
+    private val thumbnailSizes = HashMap<String, SizeI>()
 
     private var surfaceReady = false
     private var previewSurface: Surface? = null
@@ -167,6 +188,8 @@ class CameraController(
     private var deviceRotation = 0
     private var forceLogicalLensId: String? = null
     private val unsupportedLensIds = HashSet<String>()
+    /** Last AE range pinned on the preview, only used to keep the diagnostic log quiet. */
+    private var lastPreviewAeRange: IntRange? = null
 
     private var aeRegion: com.necra.purecam.core.RectI? = null
     private var afRegion: com.necra.purecam.core.RectI? = null
@@ -230,13 +253,22 @@ class CameraController(
                 notifyError("No camera found on this device")
                 return@post
             }
-            facing = if (catalog.lenses(Facing.BACK).isNotEmpty()) Facing.BACK else Facing.FRONT
-            val lens = catalog.main(facing)
+            val previous = state
+            // start() also runs on every resume (app switch, screen off, the audio-permission
+            // dialog...). Coming back must never change the camera, so keep the lens the user was
+            // on. Only a first start picks a default: the remembered facing, else the back camera.
+            val resumeLens = previous?.lens?.let { prev ->
+                catalog.lenses(prev.facing).firstOrNull { it.id == prev.id }
+            }
+            val lens = resumeLens
+                ?: (previous?.lens?.facing ?: initialFacing)?.let { catalog.main(it) }
+                ?: catalog.main(Facing.BACK)
+                ?: catalog.main(Facing.FRONT)
             if (lens == null) {
                 notifyError("No usable camera lens found")
                 return@post
             }
-            val previous = state
+            facing = lens.facing
             val base = when {
                 previous == null -> CameraState.defaults(lens)
                 previous.lens.id == lens.id -> previous
@@ -310,6 +342,74 @@ class CameraController(
 
     fun setOverlays(styles: Set<OverlayStyle>) {
         overlayStyles = styles
+    }
+
+    fun setVideoStyleExposure(enabled: Boolean) {
+        cameraHandler.post {
+            if (videoStyleExposure == enabled) return@post
+            videoStyleExposure = enabled
+            liveIso = null
+            liveShutterNs = null
+            applyPreview()
+        }
+    }
+
+    /** The saved video frame rate; the photo viewfinder follows it in video-style exposure. */
+    fun setVideoFpsPreference(fps: Int) {
+        cameraHandler.post {
+            if (videoFpsPreference == fps) return@post
+            videoFpsPreference = fps
+            if (state?.let { videoStyleActive(it) } == true) applyPreview()
+        }
+    }
+
+    private fun videoStyleActive(s: CameraState): Boolean =
+        videoStyleExposure && !videoMode && !focusAssist &&
+            s.exposure is ExposureMode.Auto && s.lens.supportsVideo && s.lens.supportsManualExposure &&
+            !(s.flash && s.lens.flashAvailable)
+
+    /** Frame rate the video recorder would pin for this lens. */
+    private fun videoStyleFps(lens: LensProfile): Int =
+        VideoMath.fpsFor(videoFpsPreference, VideoMath.supportedFps(lens.videoFpsRanges))
+
+    /** [s] with the exposure video-style AE converged to, for the still request. */
+    private fun videoStyleStillState(s: CameraState): CameraState {
+        if (!videoStyleActive(s)) return s
+        val iso = liveIso ?: return s
+        val shutter = liveShutterNs ?: return s
+        val lens = s.lens
+        return s.copy(
+            exposure = ExposureMode.Manual(
+                lens.isoRange?.clamp(iso) ?: iso,
+                lens.exposureRange?.clamp(shutter) ?: shutter
+            )
+        )
+    }
+
+    /** Largest embedded-thumbnail size the lens offers (up to 512 px wide) matching the JPEG ratio. */
+    private fun thumbnailSizeFor(lens: LensProfile, outputAspect: Float): SizeI {
+        val key = "${lens.cameraId}:${(outputAspect * 1000).toInt()}"
+        return thumbnailSizes.getOrPut(key) {
+            val offered = try {
+                cameraManager.getCameraCharacteristics(lens.cameraId)
+                    .get(CameraCharacteristics.JPEG_AVAILABLE_THUMBNAIL_SIZES)
+                    ?.filter { it.width > 0 && it.height > 0 }
+                    ?.map { SizeI(it.width, it.height) }
+                    .orEmpty()
+            } catch (t: Throwable) {
+                Log.w(tag, "could not read thumbnail sizes", t)
+                emptyList()
+            }
+            val pool = offered.filter { it.width <= 512 }.ifEmpty { offered }
+            pool.minWithOrNull(
+                compareBy<SizeI> { (AspectMath.relativeAspectError(it.aspect, outputAspect) * 20f).roundToInt() }
+                    .thenByDescending { it.area }
+            ) ?: SizeI(0, 0)
+        }
+    }
+
+    fun setInitialFacing(facing: Facing?) {
+        initialFacing = facing
     }
 
     fun setMirrorFrontPhotos(enabled: Boolean) {
@@ -411,9 +511,12 @@ class CameraController(
 
     // ---------------------------------------------------------------- user actions
 
+    /** True while a recording is running, starting, or waiting for the camera to come back. */
+    private fun recordingBusy(): Boolean = recording || recordingStarting || pendingRecording != null
+
     fun setLens(lens: LensProfile) {
         cameraHandler.post {
-            if (recording) return@post
+            if (recordingBusy()) return@post
             val s = state ?: return@post
             if (s.lens.id == lens.id) return@post
             if (unsupportedLensIds.contains(lens.id)) return@post
@@ -436,7 +539,7 @@ class CameraController(
 
     fun flipFacing() {
         cameraHandler.post {
-            if (recording) return@post
+            if (recordingBusy()) return@post
             val current = state?.lens?.facing ?: facing
             val next = when {
                 current == Facing.BACK && catalog.lenses(Facing.FRONT).isNotEmpty() -> Facing.FRONT
@@ -730,9 +833,10 @@ class CameraController(
 
         val rec = VideoRecorder(context)
         var usedAudio = withAudio
-        // The camera's recorder surface carries the raw (unmirrored) stream, matching the live
-        // preview. "Mirrored" therefore means flipping the clip, exactly like the photo path.
-        val mirrorVideo = mirrorFrontPhotos && lens.facing == Facing.FRONT
+        // Like the front JPEG, the front recorder stream arrives already mirrored on this device
+        // (the live preview is not). Keep those pixels for "Mirrored" and flip the clip only for
+        // "As previewed", exactly like the photo path.
+        val mirrorVideo = !mirrorFrontPhotos && lens.facing == Facing.FRONT
         val surface = try {
             rec.open(config, videoOrientationHint(), withAudio, mirrorVideo)
         } catch (first: Throwable) {
@@ -1146,6 +1250,8 @@ class CameraController(
         // AE/AWB state must not be reused to decide whether the new preview has settled.
         latestReadout = null
         lastReadoutMs = 0L
+        liveIso = null
+        liveShutterNs = null
         runCatching { session?.stopRepeating() }
         runCatching { session?.close() }
         session = null
@@ -1181,18 +1287,25 @@ class CameraController(
         val plan = currentPlan ?: return null
         val d = device ?: return null
         val surface = previewSurface ?: return null
-        val requestedVideoFps = if (videoMode) {
-            resolveVideoConfig(s.lens)?.fps ?: VideoMath.DEFAULT_FPS
-        } else {
-            null
+        val videoStyle = videoStyleActive(s)
+        val requestedVideoFps = when {
+            videoMode -> resolveVideoConfig(s.lens)?.fps ?: VideoMath.DEFAULT_FPS
+            videoStyle -> videoStyleFps(s.lens)
+            else -> null
         }
         val previewFpsRange = requestedVideoFps?.let {
             VideoMath.aeRangeFor(it, s.lens.videoFpsRanges)
-        } ?: VideoMath.photoAeRange(s.lens.videoFpsRanges)
+        } ?: VideoMath.previewAeRange(s.lens.videoFpsRanges)
+        if (previewFpsRange != lastPreviewAeRange) {
+            lastPreviewAeRange = previewFpsRange
+            Log.i(tag, "preview AE range=${previewFpsRange ?: "device default"}")
+        }
         val spec = RequestBuilder.build(
             state = s,
             profile = s.lens,
-            intent = CaptureIntent.PREVIEW,
+            // Video-style exposure uses exactly the request the recorder repeats: record intent,
+            // record template, AE range pinned to the video frame rate.
+            intent = if (videoStyle) CaptureIntent.RECORD else CaptureIntent.PREVIEW,
             outputAspect = plan.outputAspect,
             strategy = effectiveStrategy,
             previewClamp = true,
@@ -1200,13 +1313,16 @@ class CameraController(
             fallbackTransform = lastTransform,
             videoFps = requestedVideoFps,
             aeFpsRange = previewFpsRange?.let { RangeI(it.first, it.last) },
-            videoMode = videoMode,
+            videoMode = videoMode || videoStyle,
             exposureCompensation = exposureCompensationSteps,
             flashMetering = flashMetering
         )
-        val builder = d.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+        val builder = d.createCaptureRequest(
+            if (videoStyle) CameraDevice.TEMPLATE_RECORD else CameraDevice.TEMPLATE_PREVIEW
+        )
         builder.addTarget(surface)
         RequestApplier.apply(builder, spec, jpegOrientation(), aeRegion, afRegion)
+        if (videoStyle) builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_IDLE)
         return builder
     }
 
@@ -1483,7 +1599,7 @@ class CameraController(
     }
 
     private fun fireCapture() {
-        val s = state ?: return
+        val s = videoStyleStillState(state ?: return)
         val plan = currentPlan ?: return
         val d = device ?: return
         val r = reader ?: return
@@ -1495,11 +1611,6 @@ class CameraController(
         val orientation = jpegOrientation()
         val flashExposure = normalFlashStillExposure(s)
         val flashOn = s.flash && s.lens.flashAvailable
-        // A still must use the same AE range as the photo preview it was metered on. Omitting it
-        // lets the HAL fall back to the template default, which can keep the 60 fps sensor mode
-        // and cap the exposure at 1/60 s, making the still darker than the preview and the video.
-        // Flash stills keep the template default because they meter the LED instead of the scene.
-        val stillAeRange = if (!flashOn) VideoMath.photoAeRange(s.lens.videoFpsRanges) else null
         val still = try {
             val spec = RequestBuilder.build(
                 state = if (flashExposure != null) s.copy(exposure = flashExposure) else s,
@@ -1511,8 +1622,9 @@ class CameraController(
                 focusAssist = false,
                 fallbackTransform = lastTransform,
                 exposureCompensation = exposureCompensationSteps,
-                aeFpsRange = stillAeRange?.let { RangeI(it.first, it.last) },
-                lateFlashBehavior = lateFlashBehavior
+                lateFlashBehavior = lateFlashBehavior,
+                jpegQuality = STILL_JPEG_QUALITY,
+                thumbnailSize = thumbnailSizeFor(s.lens, plan.outputAspect)
             )
             val builder = d.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
             builder.addTarget(r.surface)
@@ -1677,6 +1789,13 @@ class CameraController(
 
     private fun handleResult(result: TotalCaptureResult) {
         if (capturing) maybeFireCapture(false, result)
+        // Remember what AE chose, so a video-style still can reuse that exact exposure.
+        val aeIso = result.get(CaptureResult.SENSOR_SENSITIVITY)
+        val aeShutter = result.get(CaptureResult.SENSOR_EXPOSURE_TIME)
+        if (aeIso != null && aeShutter != null) {
+            liveIso = aeIso
+            liveShutterNs = aeShutter
+        }
         // The readout is only needed when the manual controls ask for a starting value, so
         // sample it a few times a second instead of allocating on every preview frame.
         val now = SystemClock.elapsedRealtime()
@@ -1709,13 +1828,18 @@ class CameraController(
             // seconds on a busy device, so stop it here; saving reports its own result.
             captureWatchdog?.let { cameraHandler.removeCallbacks(it) }
             captureWatchdog = null
+            // Front camera output is already mirrored on this device. Keep those pixels
+            // for the Mirrored option; flip them only when the user chooses As previewed.
+            val flipSaved = !mirrorFrontPhotos && (state?.lens?.facing ?: facing) == Facing.FRONT
+            // The gallery button can show the camera's embedded thumbnail right now, long
+            // before the full-size file has been written.
+            runCatching {
+                com.necra.purecam.ui.previewFromJpeg(bytes, image.width, image.height, flipSaved)
+            }.getOrNull()?.let { thumb -> mainHandler.post { listener.onPhotoPreview(thumb) } }
             saver.save(
                 bytes, image.width, image.height,
                 overlays = overlayStyles,
-                // Front camera output is already mirrored on this device. Keep those pixels
-                // for the Mirrored option; flip them only when the user chooses As previewed.
-                mirrorHorizontal = !mirrorFrontPhotos &&
-                    (state?.lens?.facing ?: facing) == Facing.FRONT
+                mirrorHorizontal = flipSaved
             )
             // The camera is ready for the next frame now. Let the independent save worker finish
             // writing the original JPEG without keeping the shutter UI in a busy state.

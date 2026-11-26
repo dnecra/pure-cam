@@ -69,9 +69,9 @@ class RequestBuilderTest {
     }
 
     @Test
-    fun still_canPinThePhotoAeRangeForLowLight() {
-        // The still must keep the same AE range as the photo preview, otherwise the HAL may fall
-        // back to a high-frame-rate mode that caps exposure and saves a darker photo.
+    fun still_canPinASlowerAeRangeThanThePreview() {
+        // The still may use a slower range than the smooth preview, but it must carry a range so
+        // the HAL cannot fall back to a high-frame-rate mode that caps exposure.
         val spec = build(TestProfiles.autoState(lens), aeFpsRange = RangeI(15, 30))
 
         assertEquals(CaptureIntent.STILL, spec.intent)

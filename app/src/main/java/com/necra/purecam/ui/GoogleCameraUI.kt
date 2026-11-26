@@ -287,7 +287,9 @@ fun GoogleCameraUI(
                                 PhotoThumbnail(
                                     uri = state.lastPhoto,
                                     isVideo = state.lastMediaIsVideo,
-                                    onClick = onOpenPhoto
+                                    onClick = onOpenPhoto,
+                                    preview = state.photoPreview,
+                                    previewBase = state.photoPreviewBase
                                 )
                             }
                             ShutterButton(

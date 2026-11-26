@@ -112,16 +112,38 @@ class VideoMathTest {
     }
 
     @Test
-    fun photoAeRange_keepsLowLightHeadroomInsteadOfTheFastestRate() {
-        // A fixed 60 fps range would cap exposure at 1/60 s and darken a dim preview.
+    fun previewAeRange_staysSmoothInsteadOfDroppingTo15Fps() {
+        // A 15 fps floor lets AE slow the viewfinder to 15 fps, which reads as stutter, so the
+        // smooth 30 fps range wins even though it has less exposure headroom.
+        assertEquals(
+            30..30,
+            VideoMath.previewAeRange(listOf(15..15, 15..30, 30..30, 60..60))
+        )
+        // A variable range that can reach 60 fps is preferred over a fixed 30 fps one.
+        assertEquals(
+            30..60,
+            VideoMath.previewAeRange(listOf(15..30, 30..30, 30..60, 60..60))
+        )
+        // If nothing can sustain 30 fps, keep the most exposure headroom available.
+        assertEquals(15..30, VideoMath.previewAeRange(listOf(15..15, 15..30)))
+        assertEquals(15..15, VideoMath.previewAeRange(listOf(15..15, 24..24)))
+        // A fixed 60 fps range is still smooth, so it wins when it is the only >= 30 fps option.
+        assertEquals(60..60, VideoMath.previewAeRange(listOf(24..24, 60..60)))
+        assertNull(VideoMath.previewAeRange(emptyList()))
+    }
+
+    @Test
+    fun stillAeRange_usesTheSlowestFloorForTheLongestExposure() {
+        // The still is a single frame, so it can use the 15 fps floor without stuttering.
         assertEquals(
             15..30,
-            VideoMath.photoAeRange(listOf(15..15, 15..30, 30..30, 60..60))
+            VideoMath.stillAeRange(listOf(15..15, 15..30, 30..30, 60..60))
         )
-        assertEquals(30..30, VideoMath.photoAeRange(listOf(30..30, 60..60)))
-        // No 30 fps range: fall back to the slowest advertised maximum.
-        assertEquals(24..24, VideoMath.photoAeRange(listOf(24..24, 60..60)))
-        assertNull(VideoMath.photoAeRange(emptyList()))
+        assertEquals(10..15, VideoMath.stillAeRange(listOf(10..15, 15..30, 60..60)))
+        // A night range is capped at 1/10 s so the shot does not become a multi-second exposure.
+        assertEquals(10..30, VideoMath.stillAeRange(listOf(1..30, 10..30, 30..30)))
+        assertEquals(30..30, VideoMath.stillAeRange(listOf(30..30, 60..60)))
+        assertNull(VideoMath.stillAeRange(emptyList()))
     }
 
     @Test

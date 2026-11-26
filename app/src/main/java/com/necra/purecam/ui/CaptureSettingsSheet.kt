@@ -315,6 +315,31 @@ fun CaptureSettingsSheet(
                         }
 
                         SettingRow(
+                            "Photo exposure",
+                            if (state.photoVideoExposure) "Video-style" else "Standard"
+                        ) {
+                            val canMatchVideo = state.lens?.let { it.supportsVideo && it.supportsManualExposure } != false
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                TextPill(
+                                    label = "Video",
+                                    selected = state.photoVideoExposure,
+                                    enabled = canMatchVideo,
+                                    onClick = { viewModel.setPhotoVideoExposure(true) }
+                                )
+                                TextPill(
+                                    label = "Standard",
+                                    selected = !state.photoVideoExposure,
+                                    enabled = true,
+                                    onClick = { viewModel.setPhotoVideoExposure(false) }
+                                )
+                            }
+                        }
+
+                        SettingRow(
                             stringResource(R.string.flash_behavior),
                             if (state.flashBehavior == FlashBehavior.NORMAL) stringResource(R.string.flash_behavior_normal)
                             else stringResource(R.string.flash_behavior_late)

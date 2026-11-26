@@ -3,6 +3,7 @@ package com.necra.purecam.presentation
 import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.net.Uri
 import android.graphics.SurfaceTexture
 import android.view.TextureView
@@ -68,6 +69,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
             enabledOverlays = prefs.enabledOverlays,
             frontCameraFlipSave = prefs.frontCameraFlipSave,
             flashBehavior = prefs.flashBehavior,
+            photoVideoExposure = prefs.photoVideoExposure,
             audioGranted = hasAudioPermission()
         )
     )
@@ -100,6 +102,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     private var audioPermissionAsked = false
     private var pendingRecordConfig: VideoConfig? = null
     private var restoredWbCameraId: String? = null
+    /** Camera the user is on, so a re-created controller reopens it instead of the back camera. */
+    private var lastFacing: Facing? = null
 
     init {
         // Capture mode is a session choice: always start a fresh app launch in photo mode.
@@ -117,12 +121,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         controller = CameraController(getApplication(), previewView, this).also {
             preview = previewView
             // Queued before start(), so restored preferences are honoured from the first session.
+            it.setInitialFacing(lastFacing)
             it.setVideoMode(_uiState.value.videoMode)
             it.setCaptureAspectMode(_uiState.value.aspectMode)
             it.setDeviceRotation(_uiState.value.deviceRotation)
             it.setOverlays(_uiState.value.enabledOverlays)
             it.setMirrorFrontPhotos(_uiState.value.frontCameraFlipSave)
             it.setLateFlashBehavior(_uiState.value.flashBehavior == FlashBehavior.LATE)
+            it.setVideoStyleExposure(_uiState.value.photoVideoExposure)
+            it.setVideoFpsPreference(_uiState.value.videoFps)
         }
         startIfAllowed()
     }
@@ -162,6 +169,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         // A pending audio request owns the next recording; leave it alone.
         if (pendingRecordConfig != null) return
         cancelCountdown()
+        lastFacing = null
         prefs.captureMode = CaptureMode.PHOTO
         exposureCompensation = 0f
         currentZoom = 1f
@@ -237,6 +245,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         if (!_uiState.value.availableVideoFps.contains(fps)) return
         prefs.videoFps = fps
         _uiState.update { it.copy(videoFps = fps) }
+        controller?.setVideoFpsPreference(fps)
     }
 
     fun setCaptureAspectMode(mode: CaptureAspectMode) {
@@ -295,13 +304,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     }
 
     fun flipCamera() {
-        if (_uiState.value.recording || _uiState.value.recordingStarting || _uiState.value.savingVideo) return
+        if (_uiState.value.recording || _uiState.value.recordingStarting || _uiState.value.savingVideo ||
+            pendingRecordConfig != null
+        ) return
         cancelCountdown()
         controller?.flipFacing()
     }
 
     fun selectLens(lens: LensProfile) {
-        if (_uiState.value.recording || _uiState.value.recordingStarting || _uiState.value.savingVideo) return
+        if (_uiState.value.recording || _uiState.value.recordingStarting || _uiState.value.savingVideo ||
+            pendingRecordConfig != null
+        ) return
         cancelCountdown()
         controller?.setLens(lens)
     }
@@ -382,6 +395,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         prefs.frontCameraFlipSave = enabled
         _uiState.update { it.copy(frontCameraFlipSave = enabled) }
         controller?.setMirrorFrontPhotos(enabled)
+    }
+
+    fun setPhotoVideoExposure(enabled: Boolean) {
+        if (_uiState.value.photoVideoExposure == enabled) return
+        prefs.photoVideoExposure = enabled
+        _uiState.update { it.copy(photoVideoExposure = enabled) }
+        controller?.setVideoStyleExposure(enabled)
     }
 
     fun setFlashBehavior(behavior: FlashBehavior) {
@@ -566,6 +586,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         // A lens change (or a fallback) can land on a camera that cannot record; leave video mode
         // instead of showing a record button that can never work.
         currentZoom = state.zoom
+        lastFacing = state.lens.facing
         if (_uiState.value.videoMode &&
             VideoMath.availableQualities(
                 state.lens.videoSizes,
@@ -600,7 +621,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         }
     }
 
+    override fun onPhotoPreview(thumbnail: Bitmap) {
+        _uiState.update { it.copy(photoPreview = thumbnail, photoPreviewBase = it.lastPhoto) }
+    }
+
     override fun onPhotoSaved(uri: Uri?, error: String?) {
+        if (uri == null) _uiState.update { it.copy(photoPreview = null, photoPreviewBase = null) }
         if (uri != null) {
             prefs.lastPhoto = uri
             prefs.lastMediaIsVideo = false
@@ -614,6 +640,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
     override fun onRecordingStarted(config: VideoConfig, withAudio: Boolean) {
         prefs.videoQuality = config.quality
         prefs.videoFps = config.fps
+        controller?.setVideoFpsPreference(config.fps)
         _uiState.update {
             it.copy(
                 recording = true,
@@ -636,7 +663,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application),
         if (uri != null) {
             prefs.lastPhoto = uri
             prefs.lastMediaIsVideo = true
-            _uiState.update { it.copy(lastPhoto = uri, lastMediaIsVideo = true) }
+            _uiState.update {
+                it.copy(lastPhoto = uri, lastMediaIsVideo = true, photoPreview = null, photoPreviewBase = null)
+            }
             emitMessage(message(R.string.video_saved))
         } else if (error != null) {
             emitMessage(error)

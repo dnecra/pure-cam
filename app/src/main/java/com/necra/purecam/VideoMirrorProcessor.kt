@@ -41,6 +41,7 @@ object VideoMirrorProcessor {
 
     private const val TAG = "PureCam/Mirror"
     private const val DEFAULT_BUFFER_SIZE = 4 * 1024 * 1024
+    private val ENCODER_MIMES = listOf("video/avc", "video/hevc")
 
     /** EGL_ANDROID_recordable: guarantees the surface can be consumed by a codec. */
     private const val EGL_RECORDABLE_ANDROID = 0x3142
@@ -52,7 +53,19 @@ object VideoMirrorProcessor {
     fun mirror(source: File, destination: File, orientationHint: Int): Boolean {
         val videoOnly = File(destination.parentFile ?: source.parentFile, "${destination.name}.video")
         return try {
-            if (!transcodeVideo(source, videoOnly, orientationHint)) return false
+            // H.264 first; some encoders refuse a profile/level (4K60, say), so retry with HEVC
+            // before giving up and keeping the unmirrored clip.
+            var transcoded = false
+            for (mime in ENCODER_MIMES) {
+                transcoded = try {
+                    transcodeVideo(source, videoOnly, orientationHint, mime)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "mirror transcode with $mime failed", t)
+                    false
+                }
+                if (transcoded) break
+            }
+            if (!transcoded) return false
             remux(videoOnly, source, destination, orientationHint)
             true
         } catch (t: Throwable) {
@@ -65,7 +78,12 @@ object VideoMirrorProcessor {
 
     // ---------------------------------------------------------------- video transcode
 
-    private fun transcodeVideo(source: File, output: File, orientationHint: Int): Boolean {
+    private fun transcodeVideo(
+        source: File,
+        output: File,
+        orientationHint: Int,
+        encoderMime: String
+    ): Boolean {
         val extractor = MediaExtractor()
         var decoder: MediaCodec? = null
         var encoder: MediaCodec? = null
@@ -93,7 +111,19 @@ object VideoMirrorProcessor {
                 VideoMath.bitRate(SizeI(width, height), fps)
             )
 
-            val encoderFormat = MediaFormat.createVideoFormat("video/avc", width, height).apply {
+            // The stored frames are in sensor orientation and the container's rotation tag is
+            // re-applied by the muxer below. A decoder that renders to a surface would otherwise
+            // also apply that tag itself (it ends up inside the SurfaceTexture transform), which
+            // rotates the frame and makes the flip axis below wrong. Keep the frames unrotated.
+            format.setInteger(MediaFormat.KEY_ROTATION, 0)
+            Log.i(
+                TAG,
+                "mirroring ${width}x$height ${fps}fps hint=$orientationHint " +
+                    "flipX=${VideoMath.mirrorFlipsX(orientationHint)} " +
+                    "flipY=${VideoMath.mirrorFlipsY(orientationHint)} encoder=$encoderMime"
+            )
+
+            val encoderFormat = MediaFormat.createVideoFormat(encoderMime, width, height).apply {
                 setInteger(
                     MediaFormat.KEY_COLOR_FORMAT,
                     MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
@@ -102,7 +132,7 @@ object VideoMirrorProcessor {
                 setInteger(MediaFormat.KEY_FRAME_RATE, fps)
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
             }
-            encoder = MediaCodec.createEncoderByType("video/avc").apply {
+            encoder = MediaCodec.createEncoderByType(encoderMime).apply {
                 configure(encoderFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
                 inputSurface = createInputSurface()
                 start()
@@ -491,17 +521,15 @@ object VideoMirrorProcessor {
             texMatrixSlot = GLES20.glGetUniformLocation(program, "uTexMatrix")
             samplerSlot = GLES20.glGetUniformLocation(program, "sTexture")
 
-            // Flipping the texture coordinates (inside the SurfaceTexture transform) mirrors the
-            // rendered frame without touching the quad, so the transform stays valid as-is.
-            val u0 = if (flipX) 1f else 0f
-            val u1 = if (flipX) 0f else 1f
-            val v0 = if (flipY) 1f else 0f
-            val v1 = if (flipY) 0f else 1f
+            // Flip the quad itself. The SurfaceTexture transform (which may carry a crop inset)
+            // stays untouched and the mirror is exact.
+            val x0 = if (flipX) 1f else -1f
+            val y0 = if (flipY) 1f else -1f
             val data = floatArrayOf(
-                -1f, -1f, u0, v0,
-                1f, -1f, u1, v0,
-                -1f, 1f, u0, v1,
-                1f, 1f, u1, v1
+                x0, y0, 0f, 0f,
+                -x0, y0, 1f, 0f,
+                x0, -y0, 0f, 1f,
+                -x0, -y0, 1f, 1f
             )
             vertices = ByteBuffer.allocateDirect(data.size * 4)
                 .order(ByteOrder.nativeOrder())

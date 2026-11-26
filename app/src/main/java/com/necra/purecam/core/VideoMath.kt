@@ -103,15 +103,26 @@ object VideoMath {
     }
 
     /**
-     * AE target range for the photo-mode preview. Pinning the highest advertised rate (often a
-     * fixed 60 fps) caps exposure at one frame and darkens dim scenes, so prefer the camera's
-     * slowest useful range instead: a range containing 30 fps lets AE trade frame rate for a
-     * longer exposure, and the slowest advertised maximum is the fallback.
+     * AE target range for the live photo-mode preview: the highest advertised rate. A fixed
+     * range (e.g. 60..60) wins so the viewfinder never drops to 30 fps indoors, which reads as
+     * lag and motion blur; otherwise the lowest-floor range that reaches the top rate is used.
      */
-    fun photoAeRange(ranges: List<IntRange>): IntRange? {
+    fun previewAeRange(ranges: List<IntRange>): IntRange? {
+        val maxFps = ranges.maxOfOrNull { it.last } ?: return null
+        ranges.firstOrNull { it.first == maxFps && it.last == maxFps }?.let { return it }
+        return ranges.filter { it.last == maxFps }.minByOrNull { it.first }
+    }
+
+    /**
+     * AE target range for a one-shot still. A still does not have to sustain a preview frame
+     * rate, so the range with the lowest floor wins: that is the longest exposure the sensor
+     * allows. The floor is kept at 10 fps or higher when possible (1/10 s) so a night range
+     * such as `[1, 30]` cannot turn a handheld shot into a multi-second exposure.
+     */
+    fun stillAeRange(ranges: List<IntRange>): IntRange? {
         if (ranges.isEmpty()) return null
-        ranges.filter { 30 in it }.minByOrNull { it.first }?.let { return it }
-        return ranges.minByOrNull { it.last }
+        val candidates = ranges.filter { it.first >= 10 }.ifEmpty { ranges }
+        return candidates.minWithOrNull(compareBy({ it.first }, { -it.last }))
     }
 
     fun fpsFor(requested: Int, supported: List<Int>): Int {

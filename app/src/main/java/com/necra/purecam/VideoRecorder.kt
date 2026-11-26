@@ -23,8 +23,8 @@ import java.util.Locale
  * itself from the frames Camera2 delivers, and the pending MediaStore row is published only after
  * the file has been finalized.
  *
- * Front-camera clips may additionally need one axis mirrored so the saved video matches the
- * "Mirrored" preference. MediaRecorder has no mirror option, so in that case the clip is written
+ * Front-camera clips arrive already mirrored on this device, so "As previewed" has to flip them
+ * back. MediaRecorder has no mirror option, so in that case the clip is written
  * to a cache file first, flipped by [VideoMirrorProcessor] and copied into MediaStore once the
  * encoder has finished. If the flip fails the unmirrored recording is kept.
  */
