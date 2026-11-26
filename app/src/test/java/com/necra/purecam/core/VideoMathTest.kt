@@ -112,6 +112,19 @@ class VideoMathTest {
     }
 
     @Test
+    fun photoAeRange_keepsLowLightHeadroomInsteadOfTheFastestRate() {
+        // A fixed 60 fps range would cap exposure at 1/60 s and darken a dim preview.
+        assertEquals(
+            15..30,
+            VideoMath.photoAeRange(listOf(15..15, 15..30, 30..30, 60..60))
+        )
+        assertEquals(30..30, VideoMath.photoAeRange(listOf(30..30, 60..60)))
+        // No 30 fps range: fall back to the slowest advertised maximum.
+        assertEquals(24..24, VideoMath.photoAeRange(listOf(24..24, 60..60)))
+        assertNull(VideoMath.photoAeRange(emptyList()))
+    }
+
+    @Test
     fun frameDuration_isOneOverFps() {
         assertEquals(33_333_333L, VideoMath.frameDurationNs(30))
         assertEquals(41_666_666L, VideoMath.frameDurationNs(24))

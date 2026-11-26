@@ -67,8 +67,8 @@ object RequestBuilder {
      * @param fallbackTransform last COLOR_CORRECTION_TRANSFORM seen from auto AWB.
      * @param videoFps recording frame rate; required for [CaptureIntent.RECORD] so the sensor
      *   runs at exactly that rate and manual exposure is shortened to fit one frame.
-     * @param videoFpsRange AE target range advertised by the camera, when available. Preview
-     *   uses it to request the chosen video rate or the fastest safe photo-preview range.
+     * @param aeFpsRange AE target range advertised by the camera, when available. Preview and
+     *   still requests use it to keep the exposure headroom appropriate for their intent.
      * @param videoMode true while the screen is in video mode; the flash becomes a steady torch.
      * @param flashMetering true for the one-shot precapture request: use AE ON and
      *   FLASH_MODE_SINGLE, matching the final still request so the HAL meters the same flash
@@ -85,7 +85,7 @@ object RequestBuilder {
         focusAssist: Boolean = false,
         fallbackTransform: FloatArray? = null,
         videoFps: Int? = null,
-        videoFpsRange: RangeI? = null,
+        aeFpsRange: RangeI? = null,
         videoMode: Boolean = false,
         exposureCompensation: Int? = null,
         flashMetering: Boolean = false,
@@ -210,7 +210,7 @@ object RequestBuilder {
                 (!preview || (flashMetering && aeManagedFlashMode == null)),
             torch = flashOn && (record || (preview && videoMode)),
             aeFps = when {
-                videoFpsRange != null -> videoFpsRange
+                aeFpsRange != null -> aeFpsRange
                 record -> RangeI(fps, fps)
                 else -> null
             },

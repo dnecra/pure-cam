@@ -106,6 +106,8 @@ class CameraController(
 
     private data class PendingCapture(
         val needAe: Boolean,
+        /** True when AE is metering for a flash, which needs the longer preflash deadline. */
+        val flashAe: Boolean,
         val needLens: Boolean,
         /** Only results at or after this time may satisfy the readiness checks. */
         val startedMs: Long,
@@ -1140,6 +1142,10 @@ class CameraController(
         }
         stillSpec = null
         stillLens = null
+        // The next session belongs to a (possibly different) camera or mode, so the last sampled
+        // AE/AWB state must not be reused to decide whether the new preview has settled.
+        latestReadout = null
+        lastReadoutMs = 0L
         runCatching { session?.stopRepeating() }
         runCatching { session?.close() }
         session = null
@@ -1182,7 +1188,7 @@ class CameraController(
         }
         val previewFpsRange = requestedVideoFps?.let {
             VideoMath.aeRangeFor(it, s.lens.videoFpsRanges)
-        } ?: VideoMath.previewAeRange(s.lens.videoFpsRanges)
+        } ?: VideoMath.photoAeRange(s.lens.videoFpsRanges)
         val spec = RequestBuilder.build(
             state = s,
             profile = s.lens,
@@ -1193,7 +1199,7 @@ class CameraController(
             focusAssist = focusAssist,
             fallbackTransform = lastTransform,
             videoFps = requestedVideoFps,
-            videoFpsRange = previewFpsRange?.let { RangeI(it.first, it.last) },
+            aeFpsRange = previewFpsRange?.let { RangeI(it.first, it.last) },
             videoMode = videoMode,
             exposureCompensation = exposureCompensationSteps,
             flashMetering = flashMetering
@@ -1227,7 +1233,7 @@ class CameraController(
                 focusAssist = false,
                 fallbackTransform = lastTransform,
                 videoFps = config.fps,
-                videoFpsRange = range?.let { RangeI(it.first, it.last) },
+                aeFpsRange = range?.let { RangeI(it.first, it.last) },
                 videoMode = true,
                 exposureCompensation = exposureCompensationSteps
             )
@@ -1283,27 +1289,40 @@ class CameraController(
         // forced single-flash still. Late mode intentionally skips metering and captures directly.
         // Normal with manual sensor support needs no preflash/precapture at all (see
         // normalFlashStillExposure): one flash, no extra delay.
-        val needAe = !lateFlashBehavior && s.exposure is ExposureMode.Auto &&
-            s.flash && s.lens.flashAvailable && normalFlashStillExposure(s) == null
+        val flashOn = s.flash && s.lens.flashAvailable
+        val needFlashAe = !lateFlashBehavior && s.exposure is ExposureMode.Auto &&
+            flashOn && normalFlashStillExposure(s) == null
+        // A flash-less still also needs a settled AE. Firing immediately (as this used to do)
+        // captures whatever exposure the preview currently has, which can still be searching and
+        // much darker than the scene - especially on the front camera right after switching to it.
+        val aeSettled = latestReadout?.aeState.let {
+            it == CameraMetadata.CONTROL_AE_STATE_CONVERGED ||
+                it == CameraMetadata.CONTROL_AE_STATE_LOCKED
+        }
+        val needPlainAe = !lateFlashBehavior && s.exposure is ExposureMode.Auto &&
+            !flashOn && !aeSettled
+        val needAe = needFlashAe || needPlainAe
         val needLens = s.focus is FocusMode.Manual
         val now = SystemClock.elapsedRealtime()
         val deadline = now + when {
             // A flash precapture needs the preflash to meter the scene and the flash unit to
             // recharge before the main flash. Slow HALs regularly need more than 1.6 s.
-            needAe -> 4_000L
+            needFlashAe -> 4_000L
+            // Plain AE normally settles in a few frames; do not hold the shutter for long.
+            needPlainAe -> 1_200L
             needLens -> 1_100L
             else -> 0L
         }
         // Continuous autofocus keeps working on the preview stream. Don't add shutter lag by
         // waiting for its passive AF state to change; capture with the current focus position.
-        pending = PendingCapture(needAe, needLens, now, deadline)
+        pending = PendingCapture(needAe, needFlashAe, needLens, now, deadline)
         precapturePhase = if (needAe) 1 else 0
         settledAeResultCount = 0
         lastAeResultFrameNumber = -1L
         lastSettleKey = null
 
         if (needAe) {
-            startFlashPrecapture()
+            startAePrecapture()
         } else {
             // With AE precapture running there is nothing useful to check until a fresh result
             // arrives, so only try an immediate capture when no settling is required.
@@ -1327,8 +1346,11 @@ class CameraController(
      * which arms the flash without firing it. Only the one-shot request carries the START
      * trigger; replacing the repeating request at the same time (as the old code did) resets
      * the handshake, so AE never settled and the shot was released at the wrong moment.
+     *
+     * With the flash off this is a plain AE precapture: it makes the HAL converge on the
+     * current scene so the one-shot still does not inherit an exposure that is still searching.
      */
-    private fun startFlashPrecapture() {
+    private fun startAePrecapture() {
         val sess = session ?: return
         val capture = pending ?: return
         val start = buildPreviewRequest(flashMetering = true) ?: return
@@ -1391,7 +1413,7 @@ class CameraController(
         if (p.needAe && precapturePhase == 1 && aeState == CameraMetadata.CONTROL_AE_STATE_PRECAPTURE) {
             precapturePhase = 2
             settledAeResultCount = 0
-            Log.i(tag, "precapture: preflash metering started")
+            Log.i(tag, "precapture: AE metering started")
         }
         val settled = aeState == CameraMetadata.CONTROL_AE_STATE_CONVERGED ||
             aeState == CameraMetadata.CONTROL_AE_STATE_LOCKED ||
@@ -1405,7 +1427,8 @@ class CameraController(
         // Some HALs skip reporting PRECAPTURE. In that case, only start counting settled AE
         // results after the entry timeout; never treat SEARCHING/INACTIVE (or a missing state)
         // as completion. Require two distinct settled frames to avoid capturing on a transient.
-        val mayCountSettledResult = precapturePhase == 2 ||
+        // A plain AE precapture has no flash handshake to wait for, so its results count at once.
+        val mayCountSettledResult = !p.flashAe || precapturePhase == 2 ||
             (precapturePhase == 1 && waitedForPreflash >= PRECAPTURE_ENTER_TIMEOUT_MS)
         if (mayCountSettledResult && settled && flashReady && result != null &&
             result.frameNumber != lastAeResultFrameNumber) {
@@ -1471,6 +1494,12 @@ class CameraController(
 
         val orientation = jpegOrientation()
         val flashExposure = normalFlashStillExposure(s)
+        val flashOn = s.flash && s.lens.flashAvailable
+        // A still must use the same AE range as the photo preview it was metered on. Omitting it
+        // lets the HAL fall back to the template default, which can keep the 60 fps sensor mode
+        // and cap the exposure at 1/60 s, making the still darker than the preview and the video.
+        // Flash stills keep the template default because they meter the LED instead of the scene.
+        val stillAeRange = if (!flashOn) VideoMath.photoAeRange(s.lens.videoFpsRanges) else null
         val still = try {
             val spec = RequestBuilder.build(
                 state = if (flashExposure != null) s.copy(exposure = flashExposure) else s,
@@ -1482,6 +1511,7 @@ class CameraController(
                 focusAssist = false,
                 fallbackTransform = lastTransform,
                 exposureCompensation = exposureCompensationSteps,
+                aeFpsRange = stillAeRange?.let { RangeI(it.first, it.last) },
                 lateFlashBehavior = lateFlashBehavior
             )
             val builder = d.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)

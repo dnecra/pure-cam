@@ -103,13 +103,15 @@ object VideoMath {
     }
 
     /**
-     * Highest advertised preview rate. Prefer an exact fixed range when available; otherwise
-     * retain the camera's advertised variable range so it can adapt in dim scenes.
+     * AE target range for the photo-mode preview. Pinning the highest advertised rate (often a
+     * fixed 60 fps) caps exposure at one frame and darkens dim scenes, so prefer the camera's
+     * slowest useful range instead: a range containing 30 fps lets AE trade frame rate for a
+     * longer exposure, and the slowest advertised maximum is the fallback.
      */
-    fun previewAeRange(ranges: List<IntRange>): IntRange? {
-        val maxFps = ranges.maxOfOrNull { it.last } ?: return null
-        ranges.firstOrNull { it.first == maxFps && it.last == maxFps }?.let { return it }
-        return ranges.filter { it.last == maxFps }.minByOrNull { it.first }
+    fun photoAeRange(ranges: List<IntRange>): IntRange? {
+        if (ranges.isEmpty()) return null
+        ranges.filter { 30 in it }.minByOrNull { it.first }?.let { return it }
+        return ranges.minByOrNull { it.last }
     }
 
     fun fpsFor(requested: Int, supported: List<Int>): Int {

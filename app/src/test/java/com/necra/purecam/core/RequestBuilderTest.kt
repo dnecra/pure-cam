@@ -20,7 +20,7 @@ class RequestBuilderTest {
         focusAssist: Boolean = false,
         fallbackTransform: FloatArray? = null,
         videoFps: Int? = null,
-        videoFpsRange: RangeI? = null,
+        aeFpsRange: RangeI? = null,
         videoMode: Boolean = false,
         flashMetering: Boolean = false
     ): RequestSpec = RequestBuilder.build(
@@ -33,7 +33,7 @@ class RequestBuilderTest {
         focusAssist = focusAssist,
         fallbackTransform = fallbackTransform,
         videoFps = videoFps,
-        videoFpsRange = videoFpsRange,
+        aeFpsRange = aeFpsRange,
         videoMode = videoMode,
         flashMetering = flashMetering
     )
@@ -66,6 +66,16 @@ class RequestBuilderTest {
         assertEquals(NoProcessingFlags.THUMBNAIL_SIZE, spec.thumbnailSize)
         assertEquals(RectI(0, 0, 4000, 3000), spec.crop)
         assertEquals(1f, spec.relativeZoom, 0f)
+    }
+
+    @Test
+    fun still_canPinThePhotoAeRangeForLowLight() {
+        // The still must keep the same AE range as the photo preview, otherwise the HAL may fall
+        // back to a high-frame-rate mode that caps exposure and saves a darker photo.
+        val spec = build(TestProfiles.autoState(lens), aeFpsRange = RangeI(15, 30))
+
+        assertEquals(CaptureIntent.STILL, spec.intent)
+        assertEquals(RangeI(15, 30), spec.aeFps)
     }
 
     @Test
@@ -416,7 +426,7 @@ class RequestBuilderTest {
             state,
             intent = CaptureIntent.RECORD,
             videoFps = 30,
-            videoFpsRange = RangeI(30, 30)
+            aeFpsRange = RangeI(30, 30)
         )
 
         assertEquals(CaptureIntent.RECORD, spec.intent)
@@ -437,7 +447,7 @@ class RequestBuilderTest {
             TestProfiles.autoState(lens, flash = true),
             intent = CaptureIntent.RECORD,
             videoFps = 24,
-            videoFpsRange = RangeI(24, 24)
+            aeFpsRange = RangeI(24, 24)
         )
 
         assertEquals(AeMode.AUTO, spec.aeMode)
