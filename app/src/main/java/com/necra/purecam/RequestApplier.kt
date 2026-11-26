@@ -26,9 +26,11 @@ object RequestApplier {
         spec: RequestSpec,
         jpegOrientation: Int,
         aeRegion: RectI?,
-        afRegion: RectI?
+        afRegion: RectI?,
+        /** True when the request targets the JPEG reader, whatever its capture intent. */
+        jpegTarget: Boolean = false
     ) {
-        val still = spec.intent == CaptureIntent.STILL
+        val still = spec.intent == CaptureIntent.STILL || jpegTarget
 
         builder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
         builder.set(

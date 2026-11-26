@@ -162,15 +162,16 @@ class CameraController(
 
     /**
      * Photo exposure that follows the video recorder's auto exposure. The photo-mode viewfinder
-     * then runs the same request video uses (record template and intent, AE range pinned to the
-     * selected video frame rate), and a shot is taken with the exact ISO and shutter that AE
-     * converged to there, instead of the darker result the stock still pipeline settles on.
+     * runs the same request video uses (record template and intent, AE range pinned to the
+     * selected video frame rate) and the shot itself is that same auto-exposure request aimed at
+     * the JPEG reader, so the camera's video AE (and every hidden gain it applies) decides the
+     * exposure instead of the darker result the stock still pipeline settles on.
      */
     @Volatile private var videoStyleExposure = true
     @Volatile private var videoFpsPreference = VideoMath.DEFAULT_FPS
-    /** Newest ISO/shutter AE chose on the repeating request; fed to stills in video style. */
-    @Volatile private var liveIso: Int? = null
-    @Volatile private var liveShutterNs: Long? = null
+    /** Set when a video-style still failed on this device; stills then use the standard path. */
+    @Volatile private var videoStyleFailed = false
+    private var stillWasVideoStyle = false
     private val thumbnailSizes = HashMap<String, SizeI>()
 
     private var surfaceReady = false
@@ -348,8 +349,7 @@ class CameraController(
         cameraHandler.post {
             if (videoStyleExposure == enabled) return@post
             videoStyleExposure = enabled
-            liveIso = null
-            liveShutterNs = null
+            videoStyleFailed = false
             applyPreview()
         }
     }
@@ -364,27 +364,13 @@ class CameraController(
     }
 
     private fun videoStyleActive(s: CameraState): Boolean =
-        videoStyleExposure && !videoMode && !focusAssist &&
+        videoStyleExposure && !videoStyleFailed && !videoMode && !focusAssist &&
             s.exposure is ExposureMode.Auto && s.lens.supportsVideo && s.lens.supportsManualExposure &&
             !(s.flash && s.lens.flashAvailable)
 
     /** Frame rate the video recorder would pin for this lens. */
     private fun videoStyleFps(lens: LensProfile): Int =
         VideoMath.fpsFor(videoFpsPreference, VideoMath.supportedFps(lens.videoFpsRanges))
-
-    /** [s] with the exposure video-style AE converged to, for the still request. */
-    private fun videoStyleStillState(s: CameraState): CameraState {
-        if (!videoStyleActive(s)) return s
-        val iso = liveIso ?: return s
-        val shutter = liveShutterNs ?: return s
-        val lens = s.lens
-        return s.copy(
-            exposure = ExposureMode.Manual(
-                lens.isoRange?.clamp(iso) ?: iso,
-                lens.exposureRange?.clamp(shutter) ?: shutter
-            )
-        )
-    }
 
     /** Largest embedded-thumbnail size the lens offers (up to 512 px wide) matching the JPEG ratio. */
     private fun thumbnailSizeFor(lens: LensProfile, outputAspect: Float): SizeI {
@@ -711,7 +697,7 @@ class CameraController(
             // AE precapture is useful for metering the tapped spot, but with the flash armed
             // it makes the HAL run its preflash sequence, so the LED would blink every time
             // the user taps the viewfinder. Keep it for plain (flash-off) auto exposure only.
-            if (s.exposure is ExposureMode.Auto && !s.flash) {
+            if (s.exposure is ExposureMode.Auto && !s.flash && !videoStyleActive(s)) {
                 builder.set(
                     CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
                     CameraMetadata.CONTROL_AE_PRECAPTURE_TRIGGER_START
@@ -1250,8 +1236,6 @@ class CameraController(
         // AE/AWB state must not be reused to decide whether the new preview has settled.
         latestReadout = null
         lastReadoutMs = 0L
-        liveIso = null
-        liveShutterNs = null
         runCatching { session?.stopRepeating() }
         runCatching { session?.close() }
         session = null
@@ -1415,8 +1399,9 @@ class CameraController(
             it == CameraMetadata.CONTROL_AE_STATE_CONVERGED ||
                 it == CameraMetadata.CONTROL_AE_STATE_LOCKED
         }
+        // Video-style AE runs continuously on the viewfinder and has no precapture handshake.
         val needPlainAe = !lateFlashBehavior && s.exposure is ExposureMode.Auto &&
-            !flashOn && !aeSettled
+            !flashOn && !aeSettled && !videoStyleActive(s)
         val needAe = needFlashAe || needPlainAe
         val needLens = s.focus is FocusMode.Manual
         val now = SystemClock.elapsedRealtime()
@@ -1599,7 +1584,7 @@ class CameraController(
     }
 
     private fun fireCapture() {
-        val s = videoStyleStillState(state ?: return)
+        val s = state ?: return
         val plan = currentPlan ?: return
         val d = device ?: return
         val r = reader ?: return
@@ -1611,24 +1596,34 @@ class CameraController(
         val orientation = jpegOrientation()
         val flashExposure = normalFlashStillExposure(s)
         val flashOn = s.flash && s.lens.flashAvailable
+        val videoStyleStill = videoStyleActive(s)
+        stillWasVideoStyle = videoStyleStill
         val still = try {
+            val videoFps = if (videoStyleStill) videoStyleFps(s.lens) else null
+            val videoRange = videoFps?.let { VideoMath.aeRangeFor(it, s.lens.videoFpsRanges) }
             val spec = RequestBuilder.build(
                 state = if (flashExposure != null) s.copy(exposure = flashExposure) else s,
                 profile = s.lens,
-                intent = CaptureIntent.STILL,
+                // Video-style: the exact request the recorder repeats, only aimed at the JPEG.
+                intent = if (videoStyleStill) CaptureIntent.RECORD else CaptureIntent.STILL,
                 outputAspect = plan.outputAspect,
                 strategy = effectiveStrategy,
                 previewClamp = false,
                 focusAssist = false,
                 fallbackTransform = lastTransform,
+                videoFps = videoFps,
+                aeFpsRange = videoRange?.let { RangeI(it.first, it.last) },
+                videoMode = videoStyleStill,
                 exposureCompensation = exposureCompensationSteps,
                 lateFlashBehavior = lateFlashBehavior,
                 jpegQuality = STILL_JPEG_QUALITY,
                 thumbnailSize = thumbnailSizeFor(s.lens, plan.outputAspect)
             )
-            val builder = d.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+            val builder = d.createCaptureRequest(
+                if (videoStyleStill) CameraDevice.TEMPLATE_RECORD else CameraDevice.TEMPLATE_STILL_CAPTURE
+            )
             builder.addTarget(r.surface)
-            RequestApplier.apply(builder, spec, orientation, aeRegion, afRegion)
+            RequestApplier.apply(builder, spec, orientation, aeRegion, afRegion, jpegTarget = videoStyleStill)
             builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_IDLE)
             spec to builder
         } catch (t: Throwable) {
@@ -1661,6 +1656,12 @@ class CameraController(
 
     private fun failCapture(message: String) {
         if (!capturing) return
+        if (stillWasVideoStyle) {
+            // This device rejected the video-style still; later shots use the standard path.
+            videoStyleFailed = true
+            stillWasVideoStyle = false
+            Log.w(tag, "video-style still failed; falling back to standard stills")
+        }
         Log.e(tag, message)
         finishCapture(null, message)
     }
@@ -1789,13 +1790,7 @@ class CameraController(
 
     private fun handleResult(result: TotalCaptureResult) {
         if (capturing) maybeFireCapture(false, result)
-        // Remember what AE chose, so a video-style still can reuse that exact exposure.
-        val aeIso = result.get(CaptureResult.SENSOR_SENSITIVITY)
-        val aeShutter = result.get(CaptureResult.SENSOR_EXPOSURE_TIME)
-        if (aeIso != null && aeShutter != null) {
-            liveIso = aeIso
-            liveShutterNs = aeShutter
-        }
+
         // The readout is only needed when the manual controls ask for a starting value, so
         // sample it a few times a second instead of allocating on every preview frame.
         val now = SystemClock.elapsedRealtime()
